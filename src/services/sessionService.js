@@ -2017,15 +2017,31 @@ class SessionService {
         continue;
       }
 
-      // Keep other events as-is
-      expanded.push(event);
+      // Handle already-expanded events (vscode transcripts come pre-expanded)
+      if (event.type === 'user.message') {
+        turnCounter++;
+        expanded.push({
+          ...event,
+          _turnNumber: turnCounter,
+          data: {
+            ...event.data,
+            message: event.data?.content || event.data?.message || ''
+          }
+        });
+        continue;
+      }
+
+      // Keep other events as-is, with turn number
+      expanded.push({
+        ...event,
+        _turnNumber: turnCounter
+      });
     }
 
     return expanded;
   }
 
   /**
-   * Expand Claude format (user/assistant) to timeline format with turn_start/complete
    * @private
    * @param {Array} events - Normalized Claude events
    * @returns {Array} Expanded events with turn_start/complete

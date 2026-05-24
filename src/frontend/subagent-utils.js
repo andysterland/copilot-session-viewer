@@ -13,7 +13,7 @@
  */
 function computeSubagentOwnership(events) {
   const ownerMap = new Map();       // stableId → toolCallId
-  const subagentInfo = new Map();   // toolCallId → { name, colorIndex }
+  const subagentInfo = new Map();   // toolCallId → { name, colorIndex, meta }
 
   // 1. Collect all subagent.started toolCallIds + assign colorIndex
   let colorIdx = 0;
@@ -23,9 +23,37 @@ function computeSubagentOwnership(events) {
       if (tcid) {
         subagentInfo.set(tcid, {
           name: ev.data?.agentDisplayName || ev.data?.agentName || 'SubAgent',
-          colorIndex: colorIdx++
+          colorIndex: colorIdx++,
+          meta: {
+            agentName: ev.data?.agentName || '',
+            agentDisplayName: ev.data?.agentDisplayName || '',
+            agentDescription: ev.data?.agentDescription || ''
+          }
         });
       }
+    }
+  }
+
+  // 1a. Enrich subagentInfo with task dispatch metadata (tool.execution_start for the dispatching tool call)
+  for (const ev of events) {
+    if (ev.type !== 'tool.execution_start') continue;
+    const tcid = ev.data?.toolCallId;
+    if (!tcid || !subagentInfo.has(tcid)) continue;
+    const info = subagentInfo.get(tcid);
+    // Parse arguments (may be string or object)
+    let args = ev.data?.arguments;
+    if (typeof args === 'string') {
+      try { args = JSON.parse(args); } catch (_e) { continue; }
+    }
+    if (!args || typeof args !== 'object') continue;
+    // Merge task-level metadata into meta
+    if (args.description) info.meta.taskDescription = args.description;
+    if (args.name) info.meta.taskName = args.name;
+    if (args.agent_type) info.meta.agentType = args.agent_type;
+    if (args.mode) info.meta.taskMode = args.mode;
+    // Use task description as display name if more specific than generic agent name
+    if (args.description && info.name === (info.meta.agentDisplayName || info.meta.agentName)) {
+      info.name = args.description;
     }
   }
 
@@ -37,7 +65,8 @@ function computeSubagentOwnership(events) {
       if (!subagentInfo.has(sid)) {
         subagentInfo.set(sid, {
           name: ev.data.subAgentName,
-          colorIndex: colorIdx++
+          colorIndex: colorIdx++,
+          meta: { agentName: ev.data.subAgentName }
         });
       }
       // Directly map this event to its subagent (vscode has no parentToolCallId)
@@ -52,7 +81,8 @@ function computeSubagentOwnership(events) {
       if (!subagentInfo.has(sid)) {
         subagentInfo.set(sid, {
           name: ev._subagent.name || 'SubAgent',
-          colorIndex: colorIdx++
+          colorIndex: colorIdx++,
+          meta: { agentName: ev._subagent.name || '' }
         });
       }
       ownerMap.set(ev.stableId, sid);

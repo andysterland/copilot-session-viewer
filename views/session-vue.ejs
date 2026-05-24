@@ -844,27 +844,121 @@
       display: flex;
       align-items: center;
       gap: 8px;
+      position: relative;
     }
 
-    .subagent-dropdown {
-      padding: 4px 8px;
+    .subagent-dropdown-trigger {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
       background: #161b22;
       border: 1px solid #30363d;
       border-radius: 6px;
       color: #c9d1d9;
       font-size: 13px;
       cursor: pointer;
-      max-width: 220px;
+      max-width: 280px;
+    }
+    .subagent-dropdown-trigger:hover { border-color: #58a6ff; }
+    .subagent-trigger-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .subagent-trigger-arrow { font-size: 10px; opacity: 0.6; }
+
+    .subagent-dropdown-panel {
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0;
+      z-index: 100;
+      min-width: 320px;
+      max-width: 420px;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+      overflow: hidden;
     }
 
-    .subagent-dropdown:hover {
-      border-color: #58a6ff;
-    }
-
-    .subagent-dropdown:focus {
+    .subagent-search-input {
+      width: 100%;
+      padding: 8px 12px;
+      background: #0d1117;
+      border: none;
+      border-bottom: 1px solid #30363d;
+      color: #c9d1d9;
+      font-size: 13px;
       outline: none;
-      border-color: #58a6ff;
-      box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.3);
+      box-sizing: border-box;
+    }
+    .subagent-search-input::placeholder { color: #484f58; }
+
+    .subagent-dropdown-list {
+      max-height: 320px;
+      overflow-y: auto;
+    }
+
+    .subagent-dropdown-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 8px 12px;
+      cursor: pointer;
+      border-bottom: 1px solid #21262d;
+    }
+    .subagent-dropdown-item:last-child { border-bottom: none; }
+    .subagent-dropdown-item:hover { background: #1c2129; }
+    .subagent-dropdown-item.active { background: rgba(88, 166, 255, 0.1); }
+
+    .subagent-item-color {
+      width: 4px;
+      min-height: 20px;
+      border-radius: 2px;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    .subagent-item-body { flex: 1; min-width: 0; }
+
+    .subagent-item-name {
+      font-size: 13px;
+      color: #c9d1d9;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .subagent-item-meta {
+      display: flex;
+      gap: 6px;
+      margin-top: 2px;
+      flex-wrap: wrap;
+    }
+
+    .subagent-meta-tag {
+      font-size: 11px;
+      color: #8b949e;
+      background: #21262d;
+      padding: 1px 6px;
+      border-radius: 4px;
+    }
+    .subagent-meta-tag.dim { opacity: 0.7; }
+
+    .subagent-item-desc {
+      font-size: 11px;
+      color: #6e7681;
+      margin-top: 3px;
+      line-height: 1.4;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .subagent-dropdown-empty {
+      padding: 12px;
+      text-align: center;
+      color: #484f58;
+      font-size: 13px;
     }
 
     .subagent-usage-badge {
@@ -1040,6 +1134,7 @@
     .badge-reasoning { background: #a371f7; color: #fff; }
     .badge-turn { background: #8250df; color: #fff; }
     .badge-tool { background: #9e6a03; color: #fff; }
+    .badge-hook { background: #484f58; color: #c9d1d9; }
     .badge-subagent { background: #8957e5; color: #fff; }
     .badge-skill { background: #bf3989; color: #fff; }
     .badge-session { background: #6e7681; color: #fff; }
@@ -1290,6 +1385,35 @@
       margin-right: 3px;
     }
     
+    /* Hook event styles */
+    .hook-content { font-size: 13px; }
+    .hook-summary { color: #8b949e; }
+    .hook-section { margin-top: 4px; }
+    .hook-section-header {
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 0;
+      user-select: none;
+    }
+    .hook-section-header:hover { color: #c9d1d9; }
+    .hook-section-body {
+      margin-top: 2px;
+      padding: 6px 10px;
+      background: #161b22;
+      border: 1px solid #21262d;
+      border-radius: 4px;
+      overflow-x: auto;
+    }
+    .hook-section-body pre {
+      margin: 0;
+      font-size: 12px;
+      color: #c9d1d9;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
     /* Turn divider - Design 3: Slack Style (居中对称) */
     .turn-divider {
       display: flex;
@@ -1493,9 +1617,15 @@
         min-width: 0;
         font-size: 12px;
       }
-      .subagent-dropdown {
-        max-width: 130px;
+      .subagent-dropdown-trigger {
+        max-width: 160px;
         font-size: 12px;
+      }
+      .subagent-dropdown-panel {
+        min-width: 260px;
+        max-width: calc(100vw - 32px);
+        right: 0;
+        left: auto;
       }
       .subagent-usage-badge {
         display: none;

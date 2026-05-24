@@ -4,7 +4,8 @@ const fs = require('fs').promises;
 const { fileURLToPath } = require('url');
 const BaseSourceAdapter = require('./BaseSourceAdapter');
 const Session = require('../models/Session');
-const { shouldSkipEntry } = require('../utils/fileUtils');
+const { shouldSkipEntry, getSessionMetadataOptimized } = require('../utils/fileUtils');
+const { computeSessionStatus } = require('./adapterUtils');
 const { VsCodeParser } = require('../../lib/parsers');
 
 /**
@@ -105,6 +106,7 @@ class VsCodeAdapter extends BaseSourceAdapter {
       const candidates = [];
 
       for (const hash of hashes) {
+        // Search chatSessions/ (legacy format)
         const chatSessionsDir = path.join(dir, hash, 'chatSessions');
         try {
           const files = await fs.readdir(chatSessionsDir);
@@ -129,6 +131,24 @@ class VsCodeAdapter extends BaseSourceAdapter {
         } catch {
           // No chatSessions dir or can't read
         }
+
+        // Search transcripts/ (copilot-agent format)
+        const transcriptsDir = path.join(dir, hash, 'GitHub.copilot-chat', 'transcripts');
+        try {
+          const files = await fs.readdir(transcriptsDir);
+          const matchingFile = files.find(f => f === `${sessionId}.jsonl` || f.replace(/\.jsonl$/, '') === sessionId);
+          if (matchingFile) {
+            const fullPath = path.join(transcriptsDir, matchingFile);
+            const stats = await fs.stat(fullPath);
+            const realWorkspacePath = await this._resolveWorkspacePath(path.join(dir, hash));
+            const session = await this._buildTranscriptSession(
+              matchingFile, fullPath, stats, hash, realWorkspacePath || path.join(dir, hash)
+            );
+            if (session) candidates.push(session);
+          }
+        } catch {
+          // No transcripts dir
+        }
       }
       if (candidates.length > 0) {
         candidates.sort((a, b) => (b.updatedAt?.getTime?.() ?? 0) - (a.updatedAt?.getTime?.() ?? 0));
@@ -146,6 +166,12 @@ class VsCodeAdapter extends BaseSourceAdapter {
     }
 
     try {
+      // Transcript sessions (copilot-agent format) — use standard JSONL reader
+      if (session._isTranscript) {
+        return this.readJsonlEvents(session.filePath);
+      }
+
+      // Legacy chatSessions format — use VsCodeParser pipeline
       const parsedSession = await this._parseSessionFile(session.filePath);
       if (!parsedSession) {
         return [];
@@ -160,7 +186,11 @@ class VsCodeAdapter extends BaseSourceAdapter {
     }
   }
 
-  buildTimeline(events, _session) {
+  buildTimeline(events, session) {
+    // Transcript sessions use copilot-format events — skip vscode timeline builder
+    if (session._isTranscript) {
+      return null; // fall through to _buildCopilotTimeline via source dispatch
+    }
     const turns = [];
     let turnId = 0;
     const allSubagentIds = new Set();
@@ -255,44 +285,57 @@ class VsCodeAdapter extends BaseSourceAdapter {
   // --- Private helpers ---
 
   async _scanWorkspaceDir(workspaceHashDir) {
+    const workspaceHash = path.basename(workspaceHashDir);
+    const realWorkspacePath = await this._resolveWorkspacePath(workspaceHashDir);
+    const sessions = [];
+
+    // 1. Legacy chatSessions/ (old VSCode chat format)
     const chatSessionsDir = path.join(workspaceHashDir, 'chatSessions');
     try {
       await fs.access(chatSessionsDir);
-    } catch {
-      return [];
-    }
-
-    const workspaceHash = path.basename(workspaceHashDir);
-    const realWorkspacePath = await this._resolveWorkspacePath(workspaceHashDir);
-
-    const entries = await fs.readdir(chatSessionsDir);
-    const jsonFiles = entries.filter(e => (e.endsWith('.json') || e.endsWith('.jsonl')) && !shouldSkipEntry(e));
-    if (jsonFiles.length === 0) return [];
-
-    const sessions = [];
-    for (const file of jsonFiles) {
-      const fullPath = path.join(chatSessionsDir, file);
-      try {
-        const stats = await fs.stat(fullPath);
-        const parsedSession = await this._parseSessionFile(fullPath);
-        if (!parsedSession) continue;
-
-        const { sessionJson } = parsedSession;
-
-        const sessionId = sessionJson.sessionId || path.basename(file).replace(/\.jsonl?$/, '');
-        const requests = sessionJson.requests || [];
-        if (requests.length === 0) continue;
-
-        const statsWithPath = { ...stats, filePath: fullPath };
-        const session = this._buildSession(
-          sessionId, requests, sessionJson, statsWithPath, workspaceHash,
-          realWorkspacePath || workspaceHashDir
-        );
-        sessions.push(session);
-      } catch (err) {
-        console.warn(`[VSCode scan] Skipping malformed session file ${fullPath}: ${err.message}`);
+      const entries = await fs.readdir(chatSessionsDir);
+      const jsonFiles = entries.filter(e => (e.endsWith('.json') || e.endsWith('.jsonl')) && !shouldSkipEntry(e));
+      for (const file of jsonFiles) {
+        const fullPath = path.join(chatSessionsDir, file);
+        try {
+          const stats = await fs.stat(fullPath);
+          const parsedSession = await this._parseSessionFile(fullPath);
+          if (!parsedSession) continue;
+          const { sessionJson } = parsedSession;
+          const sessionId = sessionJson.sessionId || path.basename(file).replace(/\.jsonl?$/, '');
+          const requests = sessionJson.requests || [];
+          if (requests.length === 0) continue;
+          const statsWithPath = { ...stats, filePath: fullPath };
+          sessions.push(this._buildSession(
+            sessionId, requests, sessionJson, statsWithPath, workspaceHash,
+            realWorkspacePath || workspaceHashDir
+          ));
+        } catch (err) {
+          console.warn(`[VSCode scan] Skipping malformed session file ${fullPath}: ${err.message}`);
+        }
       }
-    }
+    } catch { /* no chatSessions dir */ }
+
+    // 2. Copilot agent transcripts (same format as copilot-cli)
+    const transcriptsDir = path.join(workspaceHashDir, 'GitHub.copilot-chat', 'transcripts');
+    try {
+      await fs.access(transcriptsDir);
+      const entries = await fs.readdir(transcriptsDir);
+      const jsonlFiles = entries.filter(e => e.endsWith('.jsonl') && !shouldSkipEntry(e));
+      for (const file of jsonlFiles) {
+        const fullPath = path.join(transcriptsDir, file);
+        try {
+          const stats = await fs.stat(fullPath);
+          const session = await this._buildTranscriptSession(
+            file, fullPath, stats, workspaceHash, realWorkspacePath || workspaceHashDir
+          );
+          if (session) sessions.push(session);
+        } catch (err) {
+          console.warn(`[VSCode scan] Skipping transcript ${fullPath}: ${err.message}`);
+        }
+      }
+    } catch { /* no transcripts dir */ }
+
     return sessions;
   }
 
@@ -451,6 +494,43 @@ class VsCodeAdapter extends BaseSourceAdapter {
         workspaceHash
       },
     });
+  }
+
+  /**
+   * Build a Session from a copilot-agent transcript file.
+   * Reuses the same metadata extraction as CopilotAdapter.
+   */
+  async _buildTranscriptSession(file, fullPath, stats, workspaceHash, workspaceCwd) {
+    const sessionId = file.replace('.jsonl', '');
+    const optimizedMetadata = await getSessionMetadataOptimized(fullPath);
+    const sessionStatus = computeSessionStatus(optimizedMetadata);
+
+    const createdAt = optimizedMetadata.startTime
+      ? new Date(optimizedMetadata.startTime)
+      : stats.birthtime;
+    const updatedAt = optimizedMetadata.lastEventTime
+      ? new Date(optimizedMetadata.lastEventTime)
+      : stats.mtime;
+
+    const session = new Session(sessionId, 'file', {
+      source: 'vscode',
+      filePath: fullPath,
+      directory: path.dirname(fullPath),
+      createdAt,
+      updatedAt,
+      summary: optimizedMetadata.firstUserMessage
+        ? optimizedMetadata.firstUserMessage.slice(0, 120)
+        : `Copilot agent session`,
+      hasEvents: true,
+      eventCount: optimizedMetadata.eventCount || 0,
+      duration: optimizedMetadata.duration,
+      sessionStatus,
+      selectedModel: optimizedMetadata.selectedModel || null,
+      copilotVersion: optimizedMetadata.copilotVersion || null,
+      workspace: { cwd: workspaceCwd, workspaceHash },
+    });
+    session._isTranscript = true;
+    return session;
   }
 
   _expandVsCodeEvents(events) {

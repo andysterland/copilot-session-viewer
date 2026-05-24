@@ -124,7 +124,8 @@ class SessionService {
     events = events.filter(e => e.type !== 'file-history-snapshot');
 
     // Normalize events to unified format (convert Claude format to standard)
-    events = events.map(event => this._normalizeEvent(event, session.source));
+    const effectiveSource = (session.source === 'vscode' && session._isTranscript) ? 'copilot' : session.source;
+    events = events.map(event => this._normalizeEvent(event, effectiveSource));
     
     // Load and merge sub-agent events (for both Copilot and Claude)
     // For Claude sessions without main events.jsonl, this will load subagents from correct path
@@ -134,6 +135,11 @@ class SessionService {
     
     // Re-run tool matching after merging subagents (subagent events need matching too)
     if (adapter && !adapter.hasCustomPipeline && session.source === 'copilot') {
+      this._matchCopilotToolCalls(events);
+      this._mergeHookEvents(events);
+      events = this._expandCopilotToTimelineFormat(events);
+    } else if (session.source === 'vscode' && session._isTranscript) {
+      // VSCode copilot-agent transcripts use the same format as copilot-cli
       this._matchCopilotToolCalls(events);
       this._mergeHookEvents(events);
       events = this._expandCopilotToTimelineFormat(events);
@@ -679,7 +685,7 @@ class SessionService {
           }
           // Update badge to show result
           start.data.badgeLabel = success ? '✓ HOOK' : '✗ HOOK';
-          start.data.badgeClass = success ? 'badge-tool' : 'badge-error';
+          start.data.badgeClass = success ? 'badge-hook' : 'badge-error';
           pending.delete(invId);
         }
         // Mark hook.end for removal
@@ -913,22 +919,18 @@ class SessionService {
       // Hook events (hook.start / hook.end)
       if (event.type === 'hook.start') {
         const d = event.data || {};
-        const parts = [];
-        if (d.hookType) parts.push(`**Hook:** ${d.hookType}`);
-        if (d.input?.toolName) parts.push(`**Tool:** ${d.input.toolName}`);
-        if (d.input?.toolArgs && Object.keys(d.input.toolArgs).length > 0) {
-          const argsStr = Object.entries(d.input.toolArgs)
-            .map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`)
-            .join(', ');
-          parts.push(`**Args:** ${argsStr}`);
-        }
-        if (d.input?.toolResult?.textResultForLlm) {
-          const preview = d.input.toolResult.textResultForLlm.slice(0, 200);
-          parts.push(`**Result:** ${preview}${d.input.toolResult.textResultForLlm.length > 200 ? '…' : ''}`);
-        }
-        if (parts.length > 0) normalized.data.message = parts.join('\n');
+        // Store structured hook data for rich rendering
+        normalized.data.hookType = d.hookType || null;
+        normalized.data.hookToolName = d.input?.toolName || null;
+        normalized.data.hookArgs = d.input?.toolArgs || null;
+        normalized.data.hookResult = d.input?.toolResult?.textResultForLlm || null;
+        // Summary line for the collapsed view
+        const summaryParts = [];
+        if (d.hookType) summaryParts.push(d.hookType);
+        if (d.input?.toolName) summaryParts.push(`→ ${d.input.toolName}`);
+        normalized.data.message = summaryParts.join(' ') || 'hook';
         normalized.data.badgeLabel = 'HOOK';
-        normalized.data.badgeClass = 'badge-tool';
+        normalized.data.badgeClass = 'badge-hook';
         this._generateBadgeInfo(normalized);
         return normalized;
       }
@@ -940,7 +942,7 @@ class SessionService {
         if (d.error) parts.push(`**Error:** ${d.error}`);
         normalized.data.message = parts.join('\n');
         normalized.data.badgeLabel = 'HOOK END';
-        normalized.data.badgeClass = d.success ? 'badge-tool' : 'badge-error';
+        normalized.data.badgeClass = d.success ? 'badge-hook' : 'badge-error';
         this._generateBadgeInfo(normalized);
         return normalized;
       }
@@ -1155,24 +1157,17 @@ class SessionService {
         break;
 
       case 'hook.start': {
-        // Extract hook invocation info
         const d = event.data || {};
-        const parts = [];
-        if (d.hookType) parts.push(`**Hook:** ${d.hookType}`);
-        if (d.input?.toolName) parts.push(`**Tool:** ${d.input.toolName}`);
-        if (d.input?.toolArgs && Object.keys(d.input.toolArgs).length > 0) {
-          const argsStr = Object.entries(d.input.toolArgs)
-            .map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`)
-            .join(', ');
-          parts.push(`**Args:** ${argsStr}`);
-        }
-        if (d.input?.toolResult?.textResultForLlm) {
-          const preview = d.input.toolResult.textResultForLlm.slice(0, 200);
-          parts.push(`**Result:** ${preview}${d.input.toolResult.textResultForLlm.length > 200 ? '…' : ''}`);
-        }
-        if (parts.length > 0) normalized.data.message = parts.join('\n');
+        normalized.data.hookType = d.hookType || null;
+        normalized.data.hookToolName = d.input?.toolName || null;
+        normalized.data.hookArgs = d.input?.toolArgs || null;
+        normalized.data.hookResult = d.input?.toolResult?.textResultForLlm || null;
+        const summaryParts = [];
+        if (d.hookType) summaryParts.push(d.hookType);
+        if (d.input?.toolName) summaryParts.push(`→ ${d.input.toolName}`);
+        normalized.data.message = summaryParts.join(' ') || 'hook';
         normalized.data.badgeLabel = 'HOOK';
-        normalized.data.badgeClass = 'badge-tool';
+        normalized.data.badgeClass = 'badge-hook';
         break;
       }
 
@@ -1184,7 +1179,7 @@ class SessionService {
         if (d.error) parts.push(`**Error:** ${d.error}`);
         normalized.data.message = parts.join('\n');
         normalized.data.badgeLabel = 'HOOK END';
-        normalized.data.badgeClass = d.success ? 'badge-tool' : 'badge-error';
+        normalized.data.badgeClass = d.success ? 'badge-hook' : 'badge-error';
         break;
       }
 
@@ -1549,7 +1544,7 @@ class SessionService {
     }
 
     // Dispatch to source-specific builder
-    if (session.source === 'copilot') {
+    if (session.source === 'copilot' || (session.source === 'vscode' && session._isTranscript)) {
       return this._buildCopilotTimeline(events, session);
     } else if (session.source === 'claude') {
       return this._buildClaudeTimeline(events, session);

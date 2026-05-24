@@ -779,13 +779,13 @@ Real report content here.
 
     it('should handle multiple report attempts and use the last one', () => {
       const report = `
-## 🎯 Effectiveness Score: 50/100
-First attempt (bad)
-## 🔧 Tool Usage Analysis
+## 📊 Scorecard
+First attempt (bad) 50/100
+## 📋 System Prompt Compliance
 More first attempt
-## 🎯 Effectiveness Score: 90/100
-Second attempt (good)
-## 🔧 Tool Usage Analysis
+## 📊 Scorecard
+Second attempt (good) 90/100
+## 📋 System Prompt Compliance
 Second attempt details
       `.trim();
 
@@ -854,16 +854,16 @@ Some noise
 ● Tool
   $ cmd
 More noise
-## 🎯 Effectiveness Score: 75/100
+## 📊 Scorecard
 Content
-## 🔧 Tool Usage
+## 📋 System Prompt Compliance
 Analysis
       `.trim();
 
       const cleaned = service._cleanReport(report);
 
-      expect(cleaned).toContain('🎯 Effectiveness Score: 75/100');
-      expect(cleaned).toContain('🔧 Tool Usage');
+      expect(cleaned).toContain('📊 Scorecard');
+      expect(cleaned).toContain('📋 System Prompt Compliance');
       expect(cleaned).not.toContain('Some noise');
     });
 
@@ -982,18 +982,19 @@ Regular line here
       const eventsFile = path.join(tmpDir, sessionId, 'events.jsonl');
       const prompt = service._buildPrompt(insightFile, eventsFile);
 
-      expect(prompt).toContain('expert AI agent evaluator');
+      expect(prompt).toContain('expert AI agent prompt-compliance auditor');
       expect(prompt).toContain('Step 1 — Discover session files');
-      expect(prompt).toContain('Step 2 — Spawn 3 sub-agents');
-      expect(prompt).toContain('Step 3 — Synthesize the final report');
-      expect(prompt).toContain('Tool Usage Analyst');
-      expect(prompt).toContain('Workflow Strategist');
-      expect(prompt).toContain('Performance Profiler');
-      expect(prompt).toContain('🎯 Effectiveness Score');
-      expect(prompt).toContain('🔧 Tool Usage Analysis');
-      expect(prompt).toContain('🔄 Workflow & Strategy');
-      expect(prompt).toContain('⚡ Performance');
-      expect(prompt).toContain('💡 Top 3 Improvements');
+      expect(prompt).toContain('Step 2 — Extract prompts');
+      expect(prompt).toContain('Step 3 — Spawn 3 sub-agents');
+      expect(prompt).toContain('Step 4 — Synthesize the final report');
+      expect(prompt).toContain('Prompt Compliance Analyst');
+      expect(prompt).toContain('Task Completion Analyst');
+      expect(prompt).toContain('Build & Test Analyst');
+      expect(prompt).toContain('📊 Scorecard');
+      expect(prompt).toContain('🔨 Build & Test Results');
+      expect(prompt).toContain('📋 System Prompt Compliance');
+      expect(prompt).toContain('🎯 User Ask Alignment');
+      expect(prompt).toContain('💡 Key Findings');
       expect(prompt).toContain(path.dirname(insightFile));
     });
 
@@ -1017,9 +1018,9 @@ Regular line here
       const eventsFile = path.join(tmpDir, sessionId, 'events.jsonl');
       const prompt = service._buildPrompt(insightFile, eventsFile);
 
-      expect(prompt).toContain('tools.md');
-      expect(prompt).toContain('workflow.md');
-      expect(prompt).toContain('performance.md');
+      expect(prompt).toContain('compliance.md');
+      expect(prompt).toContain('task.md');
+      expect(prompt).toContain('buildtest.md');
     });
 
     it('should specify final output path', () => {
@@ -1035,12 +1036,11 @@ Regular line here
       const eventsFile = path.join(tmpDir, sessionId, 'events.jsonl');
       const prompt = service._buildPrompt(insightFile, eventsFile);
 
-      expect(prompt).toContain('tool selection quality');
-      expect(prompt).toContain('error handling');
-      expect(prompt).toContain('planning quality');
-      expect(prompt).toContain('Time distribution');
-      expect(prompt).toContain('Bottlenecks');
-      expect(prompt).toContain('Concurrency');
+      expect(prompt).toContain('system prompt rules/constraints');
+      expect(prompt).toContain('user\'s ask');
+      expect(prompt).toContain('exit code');
+      expect(prompt).toContain('root cause');
+      expect(prompt).toContain('evidence from the session trace');
     });
 
     it('should include character limit constraint', () => {
@@ -1048,7 +1048,7 @@ Regular line here
       const eventsFile = path.join(tmpDir, sessionId, 'events.jsonl');
       const prompt = service._buildPrompt(insightFile, eventsFile);
 
-      expect(prompt).toContain('3000 characters');
+      expect(prompt).toContain('4000 characters');
     });
 
     it('should emphasize waiting for all sub-agents', () => {

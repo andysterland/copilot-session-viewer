@@ -308,67 +308,93 @@ class InsightService {
       ? `\n**IMPORTANT**: This directory may contain multiple .jsonl files. You MUST analyze ONLY the file named \`${eventsFilename}\`. Do NOT read or analyze any other .jsonl files in this directory.\n`
       : '';
     
-    return `You are an expert AI agent evaluator. The current working directory is an AI coding agent session folder. It contains the raw session data from an agent run.
+    return `You are an expert AI agent prompt-compliance auditor. The current working directory is an AI coding agent session folder containing raw session data from an agent run.
 ${fileInstruction}
-**Step 1 — Discover session files.** Run \`ls -la\` to see what's available, then note which files exist:
-- \`${eventsFilename}\` — the main session event log (JSONL, one JSON event per line). Primary data source. May be large. **This is the ONLY events file you should analyze.**
+**Step 1 — Discover session files.** Run \`ls -la\` to see what's available:
+- \`${eventsFilename}\` — the main session event log (JSONL, one JSON event per line). **This is the ONLY events file you should analyze.**
 - \`plan.md\` — the agent's plan (if it exists).
 - \`workspace.yaml\` — workspace configuration (if it exists).
-- Any other relevant files.
 
-**Step 2 — Spawn 3 sub-agents for parallel analysis.** First create the working directory: \`mkdir -p ${workDir}\`. Then use the Task tool to launch ALL of the following sub-agents simultaneously (in a single message with multiple Task tool calls). Each sub-agent should:
-- Read \`${eventsFilename}\` from \`${sessionDir}\` (use Bash: \`cat\`, \`jq\`, or \`python3\` to parse) **— ONLY this file, ignore others**
-- Read other session files as needed
-- Write its findings to an intermediate file in \`${workDir}/\`
-- Return a summary of its findings
+**Step 2 — Extract prompts and execution trace.** Parse \`${eventsFilename}\` to extract:
+- The **system prompt** (the agent's instructions/rules/constraints)
+- The **user prompt** (what the user actually asked for)
+- The **execution trace** — what the agent actually did (tool calls, decisions, outputs)
+- All **build/test/compile** operations and their exit codes, stdout/stderr
+
+**Step 3 — Spawn 3 sub-agents for parallel analysis.** First create the working directory: \`mkdir -p ${workDir}\`. Then use the Task tool to launch ALL of the following sub-agents simultaneously. Each sub-agent should read \`${eventsFilename}\` from \`${sessionDir}\` (use Bash: \`cat\`, \`jq\`, or \`python3\` to parse) **— ONLY this file, ignore others**.
 
 Sub-agents to spawn:
 
-1. **Tool Usage Analyst** — Analyze tool selection quality, redundant/wasted calls, error handling patterns, tool call counts and durations. Write findings to \`${workDir}/tools.md\`.
+1. **Prompt Compliance Analyst** — Extract the system prompt rules/constraints and check each against the execution trace. For each rule: was it followed, partially followed, or violated? Identify instructions the agent ignored and actions the agent took that weren't requested. Write findings to \`${workDir}/compliance.md\`.
 
-2. **Workflow Strategist** — Evaluate planning quality, sequencing logic, sub-agent decomposition, backtracking/wandering patterns. Write findings to \`${workDir}/workflow.md\`.
+2. **Task Completion Analyst** — Compare the user's ask against the agent's final output/artifacts. Did the agent deliver what was asked? Did it go off-track, do extra unrequested work, or miss requirements? Evaluate the logical coherence of the agent's plan-to-execution flow. Write findings to \`${workDir}/task.md\`.
 
-3. **Performance Profiler** — Calculate time distribution (LLM thinking vs tool execution vs idle gaps), identify bottlenecks, assess concurrency usage. Write findings to \`${workDir}/performance.md\`.
+3. **Build & Test Analyst** — Find ALL build, compile, test, lint operations in the trace. For each: extract the command, exit code, and key output lines. For failures: diagnose root cause (missing dependency? syntax error? test assertion? wrong config?). Track if the agent fixed failures or left them broken. Write findings to \`${workDir}/buildtest.md\`.
 
-**CRITICAL: You MUST wait for ALL 3 sub-agents to complete before proceeding to Step 3.** Do NOT move on until every sub-agent has returned its results. After launching them, poll or wait for their completion.
+**CRITICAL: You MUST wait for ALL 3 sub-agents to complete before proceeding to Step 4.** Do NOT move on until every sub-agent has returned its results.
 
-**Step 3 — Synthesize the final report.** Once all sub-agents are done:
+**Step 4 — Synthesize the final report.** Once all sub-agents are done:
 1. Read the intermediate files from \`${workDir}/\`
 2. Synthesize a unified report
 3. Write the final report to \`${outputPath}\`
-4. Clean up by removing the entire working directory: \`rm -rf ${workDir}\`
+4. Clean up: \`rm -rf ${workDir}\`
 
-The final report must be a markdown file with these sections:
+The final report MUST follow this exact structure:
 
-## 🎯 Effectiveness Score: X/100
-One-line verdict on how well the agent fulfilled the user's intent.
+---
 
-## 🔧 Tool Usage Analysis
-- **Tool selection quality**: Did the agent pick the right tools? Any unnecessary or redundant tool calls? (e.g. repeated Read calls on the same file, Grep when Glob would suffice, excessive Bash calls)
-- **Error handling**: How did the agent recover from tool errors? Did it retry blindly or adapt?
-- **Efficiency**: Tool call count vs. actual value delivered. Identify wasted calls.
+## 📊 Scorecard
 
-## 🔄 Workflow & Strategy
-- **Planning quality**: Did the agent have a coherent strategy, or did it wander? Look for signs of backtracking, repeated attempts, or lack of direction.
-- **Sub-agent usage** (if any): Were sub-agents spawned effectively? Was the decomposition logical? Any sub-agents that were unnecessary or too narrow/broad?
-- **Sequencing**: Were operations done in a logical order, or was there unnecessary back-and-forth?
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| System Prompt Compliance | X/10 | one-line summary |
+| User Ask Alignment | X/10 | one-line summary |
+| Execution Consistency | X/10 | one-line summary |
+| Error Recovery | X/10 | one-line summary |
 
-## ⚡ Performance
-- **Time distribution**: Where did the wall-clock time actually go? (LLM thinking vs. tool execution vs. idle gaps)
-- **Bottlenecks**: Identify the biggest time sinks and whether they were avoidable.
-- **Concurrency**: Did the agent parallelize where it could? Missed opportunities?
+**Overall: X/10**
 
-## 💡 Top 3 Improvements
-Specific, actionable recommendations to make this agent workflow better. Examples:
-- "Batch the 12 sequential Read calls into a single Glob + targeted Reads"
-- "The agent re-read file X 4 times — cache the content across turns"
-- "Sub-agent 'code-explorer' ran for 45s but its output was barely used — consider inlining"
+## 🔨 Build & Test Results
 
-Be brutally honest. Generic advice like "add error handling" is useless — always tie recommendations to specific evidence from the session data.
+For each build/test operation found in the session, list:
+- Command, exit code, pass/fail
+- For failures: root cause in one sentence
+- Final state: all green, or what's still broken
+
+If no build/test operations exist, state "No build/test operations found in this session."
+
+## 📋 System Prompt Compliance
+
+List the key rules/constraints from the system prompt. For each:
+- ✅ Followed — with brief evidence
+- ⚠️ Partially followed — what was missed
+- ❌ Violated — what happened instead
+
+Focus on rules that were violated or partially followed. Don't exhaustively list every rule that was trivially followed.
+
+## 🎯 User Ask Alignment
+
+- What the user asked for (summarize the ask)
+- What the agent actually delivered
+- Gap analysis: missing deliverables, extra unrequested work, misinterpretations
+
+## 🔄 Execution Consistency
+
+- Did the agent's execution match its own stated plan?
+- Any backtracking, contradictions, or abandoned approaches?
+- Were decisions internally consistent throughout the session?
+
+## 💡 Key Findings
+
+Top 3-5 specific, evidence-backed observations. Every finding must reference concrete events from the session trace (tool call IDs, timestamps, or quoted output). No generic advice.
+
+---
 
 IMPORTANT CONSTRAINTS:
-- Be precise and concise. Every sentence must carry data or actionable insight — no filler, no fluff.
-- The entire report MUST be under 3000 characters (including markdown formatting). Cut ruthlessly if needed.`;
+- Be precise and concise. Every sentence must carry data or actionable insight.
+- The scorecard dimensions are the backbone — all analysis must map back to them.
+- Always cite evidence from the session trace. "The agent violated rule X" is useless without showing where.
+- The entire report should be under 4000 characters.`;
   }
 
   /**
@@ -394,7 +420,7 @@ IMPORTANT CONSTRAINTS:
 
     // Look for the last occurrence of the report structure (## 🎯 Effectiveness Score)
     // which indicates the final output vs. intermediate attempts
-    const reportStartPattern = /^## 🎯\s*Effectiveness Score/m;
+    const reportStartPattern = /^## 📊\s*Scorecard/m;
     const matches = [...report.matchAll(new RegExp(reportStartPattern.source, 'gm'))];
 
     if (matches.length > 0) {

@@ -113,7 +113,7 @@ class VsCodeAdapter extends BaseSourceAdapter {
             const stats = await fs.stat(fullPath);
             const realWorkspacePath = await this._resolveWorkspacePath(path.join(dir, hash));
             const session = await this._buildTranscriptSession(
-              matchingFile, fullPath, stats, hash, realWorkspacePath || path.join(dir, hash)
+              matchingFile, fullPath, stats, hash, realWorkspacePath
             );
             if (session) candidates.push(session);
           }
@@ -166,7 +166,7 @@ class VsCodeAdapter extends BaseSourceAdapter {
         try {
           const stats = await fs.stat(fullPath);
           const session = await this._buildTranscriptSession(
-            file, fullPath, stats, workspaceHash, realWorkspacePath || workspaceHashDir
+            file, fullPath, stats, workspaceHash, realWorkspacePath
           );
           if (session) sessions.push(session);
         } catch (err) {
@@ -198,7 +198,8 @@ class VsCodeAdapter extends BaseSourceAdapter {
             return path.resolve(wsDir, ws.folders[0].path);
           }
         } catch {
-          // Ignore nested read errors
+          // Can't read the workspace file (e.g. running on a different machine).
+          // Return null rather than a misleading internal VSCode path.
         }
       }
     } catch {
@@ -238,7 +239,7 @@ class VsCodeAdapter extends BaseSourceAdapter {
       sessionStatus,
       selectedModel: optimizedMetadata.selectedModel || null,
       copilotVersion: optimizedMetadata.copilotVersion || null,
-      workspace: { cwd: workspaceCwd, workspaceHash },
+      workspace: workspaceCwd ? { cwd: workspaceCwd, workspaceHash } : { workspaceHash },
     });
     session._isTranscript = true;
     return session;

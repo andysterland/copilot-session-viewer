@@ -1203,62 +1203,8 @@ const app = createApp({
     });
 
     // ── VS Code Session Detection ──
-    const isVSCodeSession = computed(() => {
-      // Detect VS Code sessions: they have events with data.source === 'vscode'
-      // OR they have assistant.message events with data.subAgentName but no subagent.started events
-      const sorted = sortedEvents.value;
-      const hasVSCodeSource = sorted.some(ev => ev.data?.source === 'vscode');
-      if (hasVSCodeSource) return true;
-
-      // Alternative check: has subAgentName but no subagent events
-      const hasSubAgentName = sorted.some(ev =>
-        ev.type === 'assistant.message' && ev.data?.subAgentName
-      );
-      const hasSubagentEvents = sorted.some(ev =>
-        ev.type === 'subagent.started' || ev.type === 'subagent.completed' || ev.type === 'subagent.failed'
-      );
-      return hasSubAgentName && !hasSubagentEvents;
-    });
-
-    // ── VS Code Subagents ──
-    const vsCodeSubagents = computed(() => {
-      if (!isVSCodeSession.value) return [];
-
-      const sorted = sortedEvents.value;
-      const subagentMap = new Map(); // subAgentId -> { events, toolCount, firstIndex, status, name }
-
-      for (let i = 0; i < sorted.length; i++) {
-        const ev = sorted[i];
-        if (ev.type === 'assistant.message' && ev.data?.subAgentName) {
-          const id = ev.data.subAgentId || ev.data.subAgentName;
-          if (!subagentMap.has(id)) {
-            subagentMap.set(id, {
-              name: ev.data.subAgentName,
-              events: [],
-              toolCount: 0,
-              firstIndex: i, // use array index as stable position
-              status: 'completed',
-              subAgentId: ev.data.subAgentId
-            });
-          }
-          const entry = subagentMap.get(id);
-          entry.events.push(ev);
-
-          // Count tools
-          if (ev.data.tools && Array.isArray(ev.data.tools)) {
-            entry.toolCount += ev.data.tools.length;
-          }
-
-          // Update status if there are errors
-          if (ev.data.error || ev.data.status === 'error') {
-            entry.status = 'failed';
-          }
-        }
-      }
-
-      // Convert to array and sort by firstIndex
-      return Array.from(subagentMap.values()).sort((a, b) => a.firstIndex - b.firstIndex);
-    });
+    // Legacy VS Code detection removed — vscode sessions now use the same
+    // copilot-cli pipeline with real timestamps, so no special handling needed.
 
     // ── Unified Timeline Items ──
     const unifiedTimelineItems = computed(() => {
@@ -1267,80 +1213,7 @@ const app = createApp({
       const agents = subagentAnalysis.value;
       const sorted = sortedEvents.value;
 
-      // Check if this is a VS Code session and use sequence-based layout
-      if (isVSCodeSession.value) {
-        const vsAgents = vsCodeSubagents.value;
-
-        // Collect user messages with their array index positions
-        const userMessages = [];
-        for (let i = 0; i < sorted.length; i++) {
-          if (sorted[i].type === 'user.message') {
-            userMessages.push({ event: sorted[i], sortedIndex: i });
-          }
-        }
-
-        if (userMessages.length > 0 && vsAgents.length > 0) {
-          // Build user-req groups: each user message owns the subagents that follow it
-          // until the next user message (using sorted array indices)
-          for (let ui = 0; ui < userMessages.length; ui++) {
-            const { event: userMsg, sortedIndex: userIdx } = userMessages[ui];
-            const nextIdx = userMessages[ui + 1] ? userMessages[ui + 1].sortedIndex : Infinity;
-
-            // Find subagents belonging to this user request (by sorted array index)
-            const reqAgents = vsAgents.filter(sa =>
-              sa.firstIndex >= userIdx && sa.firstIndex < nextIdx
-            );
-
-            // Calculate total tool count for this user request
-            const totalTools = reqAgents.reduce((s, a) => s + a.toolCount, 0);
-
-            const msg = userMsg.data?.message || userMsg.data?.content || '';
-
-            // Push user-req header
-            items.push({
-              rowType: 'user-req',
-              userReqNumber: ui + 1,
-              message: typeof msg === 'string' ? msg.substring(0, 120) : String(msg).substring(0, 120),
-              toolCount: totalTools,
-              sequenceIndex: userIdx,
-              isSequenceEstimated: true,
-              duration: totalTools,
-            });
-
-            // Push subagent rows under this user request
-            for (const vsAgent of reqAgents) {
-              items.push({
-                rowType: 'subagent',
-                itemType: 'subagent',
-                name: vsAgent.name,
-                status: vsAgent.status,
-                toolCount: vsAgent.toolCount,
-                sequenceIndex: vsAgent.firstIndex,
-                isSequenceEstimated: true,
-                duration: vsAgent.toolCount,
-                indented: true,
-              });
-            }
-          }
-        } else if (vsAgents.length > 0) {
-          // No user messages, just show subagents
-          for (const vsAgent of vsAgents) {
-            items.push({
-              rowType: 'subagent',
-              itemType: 'subagent',
-              name: vsAgent.name,
-              status: vsAgent.status,
-              toolCount: vsAgent.toolCount,
-              sequenceIndex: vsAgent.firstIndex,
-              isSequenceEstimated: true,
-              duration: vsAgent.toolCount,
-            });
-          }
-        }
-        return items;
-      }
-
-      // Original Copilot CLI timeline logic
+      // Copilot CLI timeline logic (used for both copilot-cli and vscode sessions)
       if (groups.length) {
         for (let gi = 0; gi < groups.length; gi++) {
           const group = groups[gi];
@@ -1431,79 +1304,6 @@ const app = createApp({
       const e = endTs ? new Date(endTs).getTime() : s + 1000;
       const left = ((s - sessionStart.value) / totalDuration.value) * 100;
       const width = Math.max(((e - s) / totalDuration.value) * 100, 0.5);
-      return {
-        left: left + '%',
-        width: Math.min(width, 100 - left) + '%'
-      };
-    };
-
-    // ── VS Code Sequence-based positioning ──
-    const ganttSequencePosition = (item) => {
-      const items = unifiedTimelineItems.value;
-      if (items.length === 0) return { left: '0%', width: '0%' };
-
-      // For user-req rows, span across all its child subagent rows
-      if (item.rowType === 'user-req') {
-        const idx = items.findIndex(it => it === item);
-        if (idx === -1) return { left: '0%', width: '0%' };
-
-        // Find child subagents (indented rows immediately following this user-req)
-        const children = [];
-        for (let i = idx + 1; i < items.length; i++) {
-          if (items[i].rowType === 'user-req') break; // next user-req
-          if (items[i].rowType === 'subagent') children.push(items[i]);
-        }
-        if (children.length === 0) {
-          // No subagents — position this user-req at the end of previous subagents
-          // by finding cumulative tool count up to this point
-          const subagentItems = items.filter(it => it.rowType !== 'user-req');
-          const totalToolCount = subagentItems.reduce((sum, it) => sum + (it.toolCount || 0), 0);
-          if (totalToolCount === 0) return { left: '0%', width: '0%' };
-          // Sum tools of all subagents before this user-req in the items array
-          let cumTools = 0;
-          for (let i = 0; i < idx; i++) {
-            if (items[i].rowType === 'subagent') cumTools += (items[i].toolCount || 0);
-          }
-          const leftPct = (cumTools / totalToolCount) * 100;
-          // Minimal width bar (at least 1%)
-          return { left: leftPct + '%', width: Math.max(1, (1 / totalToolCount) * 100) + '%' };
-        }
-
-        const firstPos = ganttSequencePosition(children[0]);
-        const lastPos = ganttSequencePosition(children[children.length - 1]);
-        const startPct = parseFloat(firstPos.left);
-        const endPct = parseFloat(lastPos.left) + parseFloat(lastPos.width);
-        return {
-          left: startPct + '%',
-          width: (endPct - startPct) + '%'
-        };
-      }
-
-      // Find index of this item
-      const idx = items.findIndex(it => it === item);
-      if (idx === -1) return { left: '0%', width: '0%' };
-
-      // Calculate total tool count across subagent items only (exclude user-req)
-      const subagentItems = items.filter(it => it.rowType !== 'user-req');
-      const totalToolCount = subagentItems.reduce((sum, it) => sum + (it.toolCount || 0), 0);
-      if (totalToolCount === 0) return { left: '0%', width: '0%' };
-
-      // Calculate cumulative tool count up to this item (among subagent items only)
-      const subIdx = subagentItems.findIndex(it => it === item);
-      if (subIdx === -1) return { left: '0%', width: '0%' };
-
-      let cumulativeToolCount = 0;
-      for (let i = 0; i < subIdx; i++) {
-        cumulativeToolCount += subagentItems[i].toolCount || 0;
-      }
-
-      // Position based on sequence
-      const left = (cumulativeToolCount / totalToolCount) * 100;
-
-      // Width based on tool count with minimum width
-      const itemToolCount = item.toolCount || 0;
-      const width = Math.max((itemToolCount / totalToolCount) * 100, 2); // Minimum 2% width
-
       return {
         left: left + '%',
         width: Math.min(width, 100 - left) + '%'
@@ -1700,9 +1500,8 @@ const app = createApp({
       totalToolTime, totalToolCount, avgToolDuration, longestTool,
       successRate, errorCount, timeBreakdown,
       gapAnalysis, maxGapDuration, gapStats,
-      ganttPosition, ganttSequencePosition, toggleSort, sortIcon,
-      getToolBadgeClass, getOpBadgeClass,
-      isVSCodeSession, vsCodeSubagents
+      ganttPosition, toggleSort, sortIcon,
+      getToolBadgeClass, getOpBadgeClass
     };
   },
 
@@ -1740,17 +1539,13 @@ const app = createApp({
         </div>
         <div class="summary-card" title="Spawned subagents (via Task tool). Shows completed/failed/incomplete counts, total wall-clock time, and tool calls attributed to subagents.">
           <div class="summary-card-label">Sub-Agents</div>
-          <div class="summary-card-value">{{ subagentAnalysis.length || vsCodeSubagents.length }}</div>
+          <div class="summary-card-value">{{ subagentAnalysis.length }}</div>
           <div class="summary-card-sub" v-if="subagentAnalysis.length > 0">
             <span :style="{ color: subagentStats.successRate >= 95 ? '#3fb950' : subagentStats.successRate >= 80 ? '#d29922' : '#f85149' }">{{ subagentStats.completed }}✓</span>
             <span v-if="subagentStats.failed > 0" style="color: #f85149;"> · {{ subagentStats.failed }}✗</span>
             <span v-if="subagentStats.incomplete > 0" style="color: #d29922;"> · {{ subagentStats.incomplete }}⏳</span>
             · {{ formatDuration(subagentStats.totalTime) }}
             · {{ subagentStats.totalTools }} tools
-          </div>
-          <div class="summary-card-sub" v-else-if="vsCodeSubagents.length > 0">
-            <span style="color: #3fb950;">{{ vsCodeSubagents.length }}✓</span>
-            · {{ vsCodeSubagents.reduce((s, a) => s + a.toolCount, 0) }} tools
           </div>
         </div>
         <div class="summary-card" title="Estimated LLM reasoning time (total duration minus tool execution and user thinking time). Breakdown shows LLM percentage, tool wall-clock time, and user idle time.">
@@ -1834,23 +1629,6 @@ const app = createApp({
             </template>
           </div>
 
-          <!-- VS Code Session Banner -->
-          <div v-if="isVSCodeSession" style="
-            background: rgba(88, 166, 255, 0.1);
-            border: 1px solid rgba(88, 166, 255, 0.3);
-            border-radius: 6px;
-            padding: 12px 16px;
-            margin-bottom: 16px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            color: #58a6ff;
-            font-size: 13px;
-          ">
-            <span style="font-size: 16px;">ⓘ</span>
-            <span>Sequence layout — bar widths represent tool count, not elapsed time</span>
-          </div>
-
           <div class="gantt-container" @mousemove="onGanttMouseMove" @mouseleave="onGanttMouseLeave">
             <!-- Crosshair -->
             <div v-if="ganttCrosshairX !== null" class="gantt-crosshair" :style="{ left: ganttCrosshairX + 'px' }">
@@ -1872,16 +1650,16 @@ const app = createApp({
                 <div class="gantt-bar-area">
                   <div
                     class="gantt-bar user-req"
-                    :style="item.isSequenceEstimated ? ganttSequencePosition(item) : ganttPosition(item.startTime, item.endTime)"
-                    :title="item.isSequenceEstimated ? ('UserReq ' + item.userReqNumber + ' — ' + item.toolCount + ' tools') : ('UserReq ' + item.userReqNumber + ' — ' + formatDuration(item.duration))"
+                    :style="ganttPosition(item.startTime, item.endTime)"
+                    :title="'UserReq ' + item.userReqNumber + ' — ' + formatDuration(item.duration)"
                   >
-                    {{ item.isSequenceEstimated ? (item.toolCount + ' tools') : formatDuration(item.duration) }}
+                    {{ formatDuration(item.duration) }}
                   </div>
                 </div>
               </div>
 
-              <!-- Sub-Agent row (indented for CLI, not indented for VS Code) -->
-              <div v-else-if="item.rowType === 'subagent'" :class="['gantt-row', item.indented ? 'indented' : (item.isSequenceEstimated ? '' : 'indented')]">
+              <!-- Sub-Agent row -->
+              <div v-else-if="item.rowType === 'subagent'" :class="['gantt-row', 'indented']">
                 <div class="gantt-label" :title="item.name">
                   <a
                     :href="'/session/' + sessionId + '?eventType=subagent.started&eventName=' + encodeURIComponent(item.name) + '&eventTimestamp=' + encodeURIComponent(item.startTime || '')"
@@ -1898,16 +1676,15 @@ const app = createApp({
                   <div
                     :class="[
                       'gantt-bar',
-                      item.isSequenceEstimated ? 'sequence-estimated' : '',
                       item.status === 'completed' ? 'subagent' : item.status === 'failed' ? 'subagent-failed' : 'subagent-incomplete'
                     ]"
-                    :style="item.isSequenceEstimated ? ganttSequencePosition(item) : ganttPosition(item.startTime, item.endTime)"
-                    :title="item.isSequenceEstimated ? (item.name + ' — ' + item.toolCount + ' tools') : (item.name + ' — ' + formatDuration(item.duration))"
+                    :style="ganttPosition(item.startTime, item.endTime)"
+                    :title="item.name + ' — ' + formatDuration(item.duration)"
                   >
-                    {{ item.isSequenceEstimated ? (item.toolCount + ' tools') : formatDuration(item.duration) }}
+                    {{ formatDuration(item.duration) }}
 
-                    <!-- Event markers (only for non-sequence bars) -->
-                    <template v-if="!item.isSequenceEstimated && item.innerEventMarkers && item.innerEventMarkers.length">
+                    <!-- Event markers -->
+                    <template v-if="item.innerEventMarkers && item.innerEventMarkers.length">
                       <span
                         v-for="(marker, midx) in item.innerEventMarkers"
                         :key="'m-' + midx"

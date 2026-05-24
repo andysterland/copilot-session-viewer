@@ -150,7 +150,7 @@ class VsCodeAdapter extends BaseSourceAdapter {
           const startTs = sessionStart?.timestamp || events[0]?.timestamp;
           events.splice(sessionStart ? 1 : 0, 0, {
             type: 'user.message',
-            id: `synthetic-user-msg-0`,
+            id: 'synthetic-user-msg-0',
             timestamp: startTs,
             data: {
               content: session._chatSessionInfo.userMessage,

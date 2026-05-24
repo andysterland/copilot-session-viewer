@@ -295,8 +295,11 @@ function renderSessionCard(session) {
   }
   if (session.source === 'modernize' && session.modernizeVersion) {
     badges += `<span class="status-badge version" title="Modernize version">${escapeHtml(session.modernizeVersion)}</span>`;
-  } else if (session.copilotVersion) {
+  } else  if (session.copilotVersion) {
     badges += `<span class="status-badge version" title="CLI version">${escapeHtml(session.copilotVersion)}</span>`;
+  }
+  if (session.agentName) {
+    badges += `<span class="status-badge agent" title="Agent: ${escapeHtml(session.agentName)}">🤖 ${escapeHtml(session.agentName)}</span>`;
   }
 
   let summaryHtml = '';

@@ -137,7 +137,32 @@ class VsCodeAdapter extends BaseSourceAdapter {
     }
 
     try {
-      return this.readJsonlEvents(session.filePath);
+      const events = await this.readJsonlEvents(session.filePath);
+
+      // Inject synthetic user.message at the start if chatSessions has user prompt
+      // and the transcript doesn't start with one
+      if (session._chatSessionInfo?.userMessage && events.length > 0) {
+        const hasUserMsgAtStart = events.some((e, i) =>
+          i < 3 && (e.type === 'user.message' || e.type === 'user' || e.type === 'request')
+        );
+        if (!hasUserMsgAtStart) {
+          const sessionStart = events.find(e => e.type === 'session.start');
+          const startTs = sessionStart?.timestamp || events[0]?.timestamp;
+          events.splice(sessionStart ? 1 : 0, 0, {
+            type: 'user.message',
+            id: `synthetic-user-msg-0`,
+            timestamp: startTs,
+            data: {
+              content: session._chatSessionInfo.userMessage,
+              message: session._chatSessionInfo.userMessage,
+              _synthetic: true
+            },
+            _synthetic: true
+          });
+        }
+      }
+
+      return events;
     } catch (err) {
       console.error(`[VSCode readEvents] Error reading session ${session.id}:`, err);
       return [];
@@ -217,6 +242,9 @@ class VsCodeAdapter extends BaseSourceAdapter {
     const optimizedMetadata = await getSessionMetadataOptimized(fullPath);
     const sessionStatus = computeSessionStatus(optimizedMetadata);
 
+    // Try to extract agent info from chatSessions file
+    const chatSessionInfo = await this._extractChatSessionInfo(fullPath, sessionId);
+
     const createdAt = optimizedMetadata.startTime
       ? new Date(optimizedMetadata.startTime)
       : stats.birthtime;
@@ -224,25 +252,85 @@ class VsCodeAdapter extends BaseSourceAdapter {
       ? new Date(optimizedMetadata.lastEventTime)
       : stats.mtime;
 
+    // Prefer chatSession user message over transcript firstUserMessage
+    const firstUserMessage = chatSessionInfo.userMessage || optimizedMetadata.firstUserMessage;
+
     const session = new Session(sessionId, 'file', {
       source: 'vscode',
       filePath: fullPath,
       directory: path.dirname(fullPath),
       createdAt,
       updatedAt,
-      summary: optimizedMetadata.firstUserMessage
-        ? optimizedMetadata.firstUserMessage.slice(0, 120)
+      summary: firstUserMessage
+        ? firstUserMessage.slice(0, 120)
         : 'Copilot agent session',
       hasEvents: true,
       eventCount: optimizedMetadata.eventCount || 0,
       duration: optimizedMetadata.duration,
       sessionStatus,
-      selectedModel: optimizedMetadata.selectedModel || null,
+      selectedModel: chatSessionInfo.modelId || optimizedMetadata.selectedModel || null,
       copilotVersion: optimizedMetadata.copilotVersion || null,
       workspace: workspaceCwd ? { cwd: workspaceCwd, workspaceHash } : { workspaceHash },
+      agentName: chatSessionInfo.agentName || null,
     });
     session._isTranscript = true;
+    session._chatSessionInfo = chatSessionInfo;
     return session;
+  }
+
+  /**
+   * Extract agent name, model, and user message from the chatSessions JSONL.
+   * Path: <hash>/chatSessions/<sessionId>.jsonl (sibling of transcripts dir).
+   */
+  async _extractChatSessionInfo(transcriptPath, sessionId) {
+    const result = { agentName: null, modelId: null, userMessage: null };
+    try {
+      // Navigate from transcripts dir to chatSessions dir
+      const hashDir = path.resolve(path.dirname(transcriptPath), '..', '..');
+      const chatSessionPath = path.join(hashDir, 'chatSessions', `${sessionId}.jsonl`);
+      await fs.access(chatSessionPath);
+
+      const raw = await fs.readFile(chatSessionPath, 'utf-8');
+      const lines = raw.trim().split('\n');
+
+      for (const line of lines) {
+        const entry = JSON.parse(line);
+
+        // kind=0: initial state with requests array
+        if (entry.kind === 0 && entry.v?.requests?.[0]) {
+          const req = entry.v.requests[0];
+          // User message
+          if (req.message?.text) {
+            result.userMessage = req.message.text;
+          }
+          // Model
+          if (req.modelId) {
+            result.modelId = req.modelId;
+          }
+          // Agent (built-in agent mode)
+          if (req.agent?.id && req.agent.id !== 'github.copilot.editsAgent') {
+            result.agentName = req.agent.id;
+          }
+        }
+
+        // kind=1: diff entries — look for agent mode with file-based agent
+        if (entry.kind === 1) {
+          const keys = entry.k || [];
+          const val = entry.v;
+          if (keys.includes('mode') && val?.kind === 'agent' && val?.id) {
+            const agentId = val.id;
+            // Extract agent name from file path: .../agents/name.agent.md → name
+            const fileMatch = agentId.match(/agents\/([^/]+)\.agent\.md$/);
+            if (fileMatch) {
+              result.agentName = fileMatch[1];
+            }
+          }
+        }
+      }
+    } catch {
+      // chatSessions file not found or unreadable — not critical
+    }
+    return result;
   }
 }
 

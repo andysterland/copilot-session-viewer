@@ -1722,6 +1722,10 @@
                     <td>Model</td>
                     <td>{{ metadata.model }}</td>
                   </tr>
+                  <tr v-if="metadata.agentName">
+                    <td>Agent</td>
+                    <td>🤖 {{ metadata.agentName }}</td>
+                  </tr>
                   <tr v-if="metadata.repo">
                     <td>Repo</td>
                     <td>{{ metadata.repo }}</td>
@@ -2163,7 +2167,7 @@
                       :title="'Filter to ' + getSubagentInfo(item).name"
                       @click.stop="selectSubagent(getSubagentInfo(item).toolCallId)"
                     >🤖 {{ getSubagentInfo(item).name }}</span>
-                    <span v-if="metadata.source !== 'vscode'" class="event-timestamp">{{ formatTime(item.timestamp) }}</span>
+                    <span class="event-timestamp">{{ formatTime(item.timestamp) }}</span>
                   </div>
 
                   <!-- Abort event: show reason -->

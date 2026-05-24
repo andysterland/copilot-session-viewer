@@ -22,6 +22,7 @@ class Session {
     this.copilotVersion = options.copilotVersion || null; // Copilot CLI version
     this.modernizeVersion = options.modernizeVersion || null; // Modernize CLI version (from dir path)
     this.selectedModel = options.selectedModel || null; // LLM model used
+    this.agentName = options.agentName || null; // Custom agent name (from chatSessions)
     this.sessionStatus = options.sessionStatus || 'completed'; // 'completed' | 'wip'
   }
 
@@ -126,6 +127,7 @@ class Session {
       copilotVersion: this.copilotVersion,
       modernizeVersion: this.modernizeVersion,
       selectedModel: this.selectedModel,
+      agentName: this.agentName,
       sessionStatus: this.sessionStatus
     };
   }

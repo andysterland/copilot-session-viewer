@@ -134,15 +134,11 @@ class SessionService {
     }
     
     // Re-run tool matching after merging subagents (subagent events need matching too)
-    if (adapter && !adapter.hasCustomPipeline && session.source === 'copilot') {
+    if ((adapter && !adapter.hasCustomPipeline && session.source === 'copilot') || session.source === 'vscode') {
       this._matchCopilotToolCalls(events);
       this._mergeHookEvents(events);
       events = this._expandCopilotToTimelineFormat(events);
-    } else if (session.source === 'vscode') {
-      // VSCode copilot-agent transcripts use the same format as copilot-cli
-      this._matchCopilotToolCalls(events);
-      this._mergeHookEvents(events);
-      events = this._expandCopilotToTimelineFormat(events);
+      events = this._synthesizeSubagentBoundaryEvents(events);
     } else if (adapter && !adapter.hasCustomPipeline && session.source === 'claude') {
       this._matchClaudeToolResults(events);
       events = this._expandClaudeToTimelineFormat(events);
@@ -1909,9 +1905,6 @@ class SessionService {
     const expanded = [];
     let turnCounter = 0;
 
-    // Check if native subagent.started events exist (skip synthesis if so)
-    const hasNativeSubagentEvents = events.some(e => e.type === 'subagent.started');
-
     for (let i = 0; i < events.length; i++) {
       const event = events[i];
 
@@ -1988,32 +1981,6 @@ class SessionService {
         // Tools are attached to assistant event as data.tools array
         if (event.data?.tools && event.data.tools.length > 0) {
           event.data.tools.forEach((tool, idx) => {
-            const toolName = tool.start?.data?.toolName || tool.tool || '';
-            const isSubagentTool = toolName === 'runSubagent';
-
-            // Synthesize subagent.started from runSubagent tool calls
-            if (isSubagentTool && tool.start && !hasNativeSubagentEvents) {
-              const tcid = tool.start.data?.toolCallId || `synth-sa-${i}-${idx}`;
-              let args = tool.start.data?.arguments;
-              if (typeof args === 'string') {
-                try { args = JSON.parse(args); } catch (_e) { args = {}; }
-              }
-              const agentName = args?.description || args?.name || 'SubAgent';
-              expanded.push({
-                type: 'subagent.started',
-                id: `${tcid}-synth-start`,
-                timestamp: tool.start.timestamp || timestamp,
-                data: {
-                  toolCallId: tcid,
-                  agentName: agentName,
-                  agentDisplayName: agentName,
-                  agentDescription: args?.description || ''
-                },
-                _synthetic: true,
-                _fileIndex: event._fileIndex + 0.09 + (idx * 0.02)
-              });
-            }
-
             // tool.execution_start
             if (tool.start) {
               expanded.push({
@@ -2027,23 +1994,6 @@ class SessionService {
               expanded.push({
                 ...tool.complete,
                 _fileIndex: event._fileIndex + 0.15 + (idx * 0.02)
-              });
-            }
-
-            // Synthesize subagent.completed from runSubagent tool calls
-            if (isSubagentTool && !hasNativeSubagentEvents) {
-              const tcid = tool.start?.data?.toolCallId || `synth-sa-${i}-${idx}`;
-              const endTs = tool.complete?.timestamp || tool.start?.timestamp || timestamp;
-              expanded.push({
-                type: 'subagent.completed',
-                id: `${tcid}-synth-end`,
-                timestamp: endTs,
-                data: {
-                  toolCallId: tcid,
-                  result: 'Sub-agent completed'
-                },
-                _synthetic: true,
-                _fileIndex: event._fileIndex + 0.16 + (idx * 0.02)
               });
             }
           });
@@ -2080,6 +2030,78 @@ class SessionService {
    * @param {Array} events - Normalized Claude events
    * @returns {Array} Expanded events with turn_start/complete
    */
+  /**
+   * Synthesize subagent.started / subagent.completed events from runSubagent
+   * tool execution pairs when native boundary events are absent.
+   * Works on already-expanded event arrays (post-_expandCopilotToTimelineFormat).
+   * @private
+   */
+  _synthesizeSubagentBoundaryEvents(events) {
+    if (events.some(e => e.type === 'subagent.started')) {
+      return events; // native events exist, skip
+    }
+
+    // Collect runSubagent toolCallIds from start events
+    const runSubagentIds = new Map(); // toolCallId → start event
+    for (const ev of events) {
+      if (ev.type === 'tool.execution_start' && ev.data?.toolName === 'runSubagent') {
+        runSubagentIds.set(ev.data.toolCallId, ev);
+      }
+    }
+
+    if (runSubagentIds.size === 0) return events;
+
+    const synthetic = [];
+    for (const ev of events) {
+      if (ev.type === 'tool.execution_start' && runSubagentIds.has(ev.data?.toolCallId)) {
+        const tcid = ev.data.toolCallId;
+        let args = ev.data.arguments;
+        if (typeof args === 'string') {
+          try { args = JSON.parse(args); } catch (_e) { args = {}; }
+        }
+        args = args || {};
+        const agentName = args.description || args.agentName || args.name || 'SubAgent';
+        synthetic.push({
+          type: 'subagent.started',
+          id: `${tcid}-synth-start`,
+          timestamp: ev.timestamp,
+          data: {
+            toolCallId: tcid,
+            agentName,
+            agentDisplayName: agentName,
+            agentDescription: args.description || ''
+          },
+          _synthetic: true,
+          _fileIndex: (ev._fileIndex || 0) - 0.001
+        });
+      } else if (ev.type === 'tool.execution_complete' && runSubagentIds.has(ev.data?.toolCallId)) {
+        const tcid = ev.data.toolCallId;
+        synthetic.push({
+          type: 'subagent.completed',
+          id: `${tcid}-synth-end`,
+          timestamp: ev.timestamp,
+          data: {
+            toolCallId: tcid,
+            result: 'Sub-agent completed'
+          },
+          _synthetic: true,
+          _fileIndex: (ev._fileIndex || 0) + 0.001
+        });
+      }
+    }
+
+    if (synthetic.length === 0) return events;
+
+    const merged = events.concat(synthetic);
+    merged.sort((a, b) => {
+      const ta = new Date(a.timestamp || 0).getTime();
+      const tb = new Date(b.timestamp || 0).getTime();
+      if (ta !== tb) return ta - tb;
+      return (a._fileIndex || 0) - (b._fileIndex || 0);
+    });
+    return merged;
+  }
+
   _expandClaudeToTimelineFormat(events) {
     const expanded = [];
     let turnCounter = 0;

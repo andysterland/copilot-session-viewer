@@ -124,7 +124,8 @@ class SessionService {
     events = events.filter(e => e.type !== 'file-history-snapshot');
 
     // Normalize events to unified format (convert Claude format to standard)
-    events = events.map(event => this._normalizeEvent(event, session.source));
+    const effectiveSource = session.source === 'vscode' ? 'copilot' : session.source;
+    events = events.map(event => this._normalizeEvent(event, effectiveSource));
     
     // Load and merge sub-agent events (for both Copilot and Claude)
     // For Claude sessions without main events.jsonl, this will load subagents from correct path
@@ -133,10 +134,11 @@ class SessionService {
     }
     
     // Re-run tool matching after merging subagents (subagent events need matching too)
-    if (adapter && !adapter.hasCustomPipeline && session.source === 'copilot') {
+    if ((adapter && !adapter.hasCustomPipeline && session.source === 'copilot') || session.source === 'vscode') {
       this._matchCopilotToolCalls(events);
       this._mergeHookEvents(events);
       events = this._expandCopilotToTimelineFormat(events);
+      events = this._synthesizeSubagentBoundaryEvents(events);
     } else if (adapter && !adapter.hasCustomPipeline && session.source === 'claude') {
       this._matchClaudeToolResults(events);
       events = this._expandClaudeToTimelineFormat(events);
@@ -679,7 +681,7 @@ class SessionService {
           }
           // Update badge to show result
           start.data.badgeLabel = success ? '✓ HOOK' : '✗ HOOK';
-          start.data.badgeClass = success ? 'badge-tool' : 'badge-error';
+          start.data.badgeClass = success ? 'badge-hook' : 'badge-error';
           pending.delete(invId);
         }
         // Mark hook.end for removal
@@ -913,22 +915,18 @@ class SessionService {
       // Hook events (hook.start / hook.end)
       if (event.type === 'hook.start') {
         const d = event.data || {};
-        const parts = [];
-        if (d.hookType) parts.push(`**Hook:** ${d.hookType}`);
-        if (d.input?.toolName) parts.push(`**Tool:** ${d.input.toolName}`);
-        if (d.input?.toolArgs && Object.keys(d.input.toolArgs).length > 0) {
-          const argsStr = Object.entries(d.input.toolArgs)
-            .map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`)
-            .join(', ');
-          parts.push(`**Args:** ${argsStr}`);
-        }
-        if (d.input?.toolResult?.textResultForLlm) {
-          const preview = d.input.toolResult.textResultForLlm.slice(0, 200);
-          parts.push(`**Result:** ${preview}${d.input.toolResult.textResultForLlm.length > 200 ? '…' : ''}`);
-        }
-        if (parts.length > 0) normalized.data.message = parts.join('\n');
+        // Store structured hook data for rich rendering
+        normalized.data.hookType = d.hookType || null;
+        normalized.data.hookToolName = d.input?.toolName || null;
+        normalized.data.hookArgs = d.input?.toolArgs || null;
+        normalized.data.hookResult = d.input?.toolResult?.textResultForLlm || null;
+        // Summary line for the collapsed view
+        const summaryParts = [];
+        if (d.hookType) summaryParts.push(d.hookType);
+        if (d.input?.toolName) summaryParts.push(`→ ${d.input.toolName}`);
+        normalized.data.message = summaryParts.join(' ') || 'hook';
         normalized.data.badgeLabel = 'HOOK';
-        normalized.data.badgeClass = 'badge-tool';
+        normalized.data.badgeClass = 'badge-hook';
         this._generateBadgeInfo(normalized);
         return normalized;
       }
@@ -940,7 +938,7 @@ class SessionService {
         if (d.error) parts.push(`**Error:** ${d.error}`);
         normalized.data.message = parts.join('\n');
         normalized.data.badgeLabel = 'HOOK END';
-        normalized.data.badgeClass = d.success ? 'badge-tool' : 'badge-error';
+        normalized.data.badgeClass = d.success ? 'badge-hook' : 'badge-error';
         this._generateBadgeInfo(normalized);
         return normalized;
       }
@@ -1155,24 +1153,17 @@ class SessionService {
         break;
 
       case 'hook.start': {
-        // Extract hook invocation info
         const d = event.data || {};
-        const parts = [];
-        if (d.hookType) parts.push(`**Hook:** ${d.hookType}`);
-        if (d.input?.toolName) parts.push(`**Tool:** ${d.input.toolName}`);
-        if (d.input?.toolArgs && Object.keys(d.input.toolArgs).length > 0) {
-          const argsStr = Object.entries(d.input.toolArgs)
-            .map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`)
-            .join(', ');
-          parts.push(`**Args:** ${argsStr}`);
-        }
-        if (d.input?.toolResult?.textResultForLlm) {
-          const preview = d.input.toolResult.textResultForLlm.slice(0, 200);
-          parts.push(`**Result:** ${preview}${d.input.toolResult.textResultForLlm.length > 200 ? '…' : ''}`);
-        }
-        if (parts.length > 0) normalized.data.message = parts.join('\n');
+        normalized.data.hookType = d.hookType || null;
+        normalized.data.hookToolName = d.input?.toolName || null;
+        normalized.data.hookArgs = d.input?.toolArgs || null;
+        normalized.data.hookResult = d.input?.toolResult?.textResultForLlm || null;
+        const summaryParts = [];
+        if (d.hookType) summaryParts.push(d.hookType);
+        if (d.input?.toolName) summaryParts.push(`→ ${d.input.toolName}`);
+        normalized.data.message = summaryParts.join(' ') || 'hook';
         normalized.data.badgeLabel = 'HOOK';
-        normalized.data.badgeClass = 'badge-tool';
+        normalized.data.badgeClass = 'badge-hook';
         break;
       }
 
@@ -1184,7 +1175,7 @@ class SessionService {
         if (d.error) parts.push(`**Error:** ${d.error}`);
         normalized.data.message = parts.join('\n');
         normalized.data.badgeLabel = 'HOOK END';
-        normalized.data.badgeClass = d.success ? 'badge-tool' : 'badge-error';
+        normalized.data.badgeClass = d.success ? 'badge-hook' : 'badge-error';
         break;
       }
 
@@ -1291,6 +1282,11 @@ class SessionService {
       return event.message.usage;
     }
 
+    // Copilot-cli: usage in payload.usage (Anthropic API response format)
+    if (event?.payload?.usage && typeof event.payload.usage === 'object') {
+      return event.payload.usage;
+    }
+
     return null;
   }
 
@@ -1323,7 +1319,7 @@ class SessionService {
    * @returns {string|null} Model name
    */
   _getClaudeEventModel(event) {
-    return event?.model || event?.message?.model || event?._originalMessage?.model || null;
+    return event?.model || event?.message?.model || event?._originalMessage?.model || event?.payload?.model || null;
   }
 
   /**
@@ -1562,7 +1558,7 @@ class SessionService {
     }
 
     // Dispatch to source-specific builder
-    if (session.source === 'copilot') {
+    if (session.source === 'copilot' || session.source === 'vscode') {
       return this._buildCopilotTimeline(events, session);
     } else if (session.source === 'claude') {
       return this._buildClaudeTimeline(events, session);
@@ -2034,19 +2030,107 @@ class SessionService {
         continue;
       }
 
-      // Keep other events as-is
-      expanded.push(event);
+      // Handle already-expanded events (vscode transcripts come pre-expanded)
+      if (event.type === 'user.message') {
+        turnCounter++;
+        expanded.push({
+          ...event,
+          _turnNumber: turnCounter,
+          data: {
+            ...event.data,
+            message: event.data?.content || event.data?.message || ''
+          }
+        });
+        continue;
+      }
+
+      // Keep other events as-is, with turn number
+      expanded.push({
+        ...event,
+        _turnNumber: turnCounter
+      });
     }
 
     return expanded;
   }
 
   /**
-   * Expand Claude format (user/assistant) to timeline format with turn_start/complete
    * @private
    * @param {Array} events - Normalized Claude events
    * @returns {Array} Expanded events with turn_start/complete
    */
+  /**
+   * Synthesize subagent.started / subagent.completed events from runSubagent
+   * tool execution pairs when native boundary events are absent.
+   * Works on already-expanded event arrays (post-_expandCopilotToTimelineFormat).
+   * @private
+   */
+  _synthesizeSubagentBoundaryEvents(events) {
+    if (events.some(e => e.type === 'subagent.started')) {
+      return events; // native events exist, skip
+    }
+
+    // Collect runSubagent toolCallIds from start events
+    const runSubagentIds = new Map(); // toolCallId → start event
+    for (const ev of events) {
+      if (ev.type === 'tool.execution_start' && ev.data?.toolName === 'runSubagent') {
+        runSubagentIds.set(ev.data.toolCallId, ev);
+      }
+    }
+
+    if (runSubagentIds.size === 0) return events;
+
+    const synthetic = [];
+    for (const ev of events) {
+      if (ev.type === 'tool.execution_start' && runSubagentIds.has(ev.data?.toolCallId)) {
+        const tcid = ev.data.toolCallId;
+        let args = ev.data.arguments;
+        if (typeof args === 'string') {
+          try { args = JSON.parse(args); } catch (_e) { args = {}; }
+        }
+        args = args || {};
+        const agentName = args.description || args.agentName || args.name || 'SubAgent';
+        synthetic.push({
+          type: 'subagent.started',
+          id: `${tcid}-synth-start`,
+          timestamp: ev.timestamp,
+          data: {
+            toolCallId: tcid,
+            agentName,
+            agentDisplayName: agentName,
+            agentDescription: args.description || ''
+          },
+          _synthetic: true,
+          _fileIndex: (ev._fileIndex || 0) - 0.001
+        });
+      } else if (ev.type === 'tool.execution_complete' && runSubagentIds.has(ev.data?.toolCallId)) {
+        const tcid = ev.data.toolCallId;
+        synthetic.push({
+          type: 'subagent.completed',
+          id: `${tcid}-synth-end`,
+          timestamp: ev.timestamp,
+          data: {
+            toolCallId: tcid,
+            result: 'Sub-agent completed'
+          },
+          _synthetic: true,
+          _fileIndex: (ev._fileIndex || 0) + 0.001
+        });
+      }
+    }
+
+    if (synthetic.length === 0) return events;
+
+    const merged = events.concat(synthetic);
+    merged.sort((a, b) => {
+      const ta = new Date(a.timestamp || 0).getTime();
+      const tb = new Date(b.timestamp || 0).getTime();
+      if (ta !== tb) return ta - tb;
+      return (a._fileIndex || 0) - (b._fileIndex || 0);
+    });
+    return merged;
+  }
+
   _expandClaudeToTimelineFormat(events) {
     const expanded = [];
     let turnCounter = 0;

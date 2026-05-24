@@ -106,6 +106,7 @@ describe('Session', () => {
         copilotVersion: null,
         modernizeVersion: null,
         selectedModel: null,
+        agentName: null,
         sessionStatus: 'completed'
       });
     });

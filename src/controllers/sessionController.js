@@ -118,6 +118,17 @@ class SessionController {
 
       const metadata = buildMetadata(session);
 
+      // Extract usage data from events (same as session detail)
+      try {
+        const events = await this.sessionService.getSessionEvents(sessionId);
+        const usage = this.sessionService.extractUsageData(events);
+        if (usage) {
+          metadata.usage = usage;
+        }
+      } catch (err) {
+        console.error('Error extracting usage data for time analysis:', err);
+      }
+
       // Track TimeAnalysisViewed event
       trackEvent('TimeAnalysisViewed', {
         sessionId,

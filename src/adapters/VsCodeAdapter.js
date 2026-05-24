@@ -4,8 +4,8 @@ const fs = require('fs').promises;
 const { fileURLToPath } = require('url');
 const BaseSourceAdapter = require('./BaseSourceAdapter');
 const Session = require('../models/Session');
-const { shouldSkipEntry } = require('../utils/fileUtils');
-const { VsCodeParser } = require('../../lib/parsers');
+const { shouldSkipEntry, getSessionMetadataOptimized } = require('../utils/fileUtils');
+const { computeSessionStatus } = require('./adapterUtils');
 
 /**
  * Return candidate VS Code workspace storage paths in preference order.
@@ -35,14 +35,13 @@ function getVSCodeWorkspaceStorageCandidates() {
 /**
  * VSCode Copilot Chat Source Adapter
  *
- * Handles sessions stored in VS Code workspaceStorage.
- * Supports both .json (flat) and .jsonl (incremental patch) formats.
+ * Reads copilot-agent transcript sessions from VS Code workspaceStorage.
+ * Only reads GitHub.copilot-chat/transcripts/*.jsonl (same format as copilot-cli).
  */
 class VsCodeAdapter extends BaseSourceAdapter {
   constructor() {
     super();
     this._candidates = null;
-    this._parser = new VsCodeParser();
   }
 
   get type() { return 'vscode'; }
@@ -105,29 +104,21 @@ class VsCodeAdapter extends BaseSourceAdapter {
       const candidates = [];
 
       for (const hash of hashes) {
-        const chatSessionsDir = path.join(dir, hash, 'chatSessions');
+        const transcriptsDir = path.join(dir, hash, 'GitHub.copilot-chat', 'transcripts');
         try {
-          const files = await fs.readdir(chatSessionsDir);
-          const matchingFile = files.find(f => f === `${sessionId}.json` || f === `${sessionId}.jsonl` || f.replace(/\.jsonl?$/, '') === sessionId);
+          const files = await fs.readdir(transcriptsDir);
+          const matchingFile = files.find(f => f === `${sessionId}.jsonl` || f.replace(/\.jsonl$/, '') === sessionId);
           if (matchingFile) {
-            const fullPath = path.join(chatSessionsDir, matchingFile);
+            const fullPath = path.join(transcriptsDir, matchingFile);
             const stats = await fs.stat(fullPath);
-            const parsedSession = await this._parseSessionFile(fullPath);
-            if (!parsedSession) continue;
-
-            const { sessionJson } = parsedSession;
-            const requests = sessionJson.requests || [];
-            if (requests.length === 0) continue;
-
             const realWorkspacePath = await this._resolveWorkspacePath(path.join(dir, hash));
-            const statsWithPath = { ...stats, filePath: fullPath };
-            candidates.push(this._buildSession(
-              sessionId, requests, sessionJson, statsWithPath, hash,
-              realWorkspacePath || path.join(dir, hash)
-            ));
+            const session = await this._buildTranscriptSession(
+              matchingFile, fullPath, stats, hash, realWorkspacePath
+            );
+            if (session) candidates.push(session);
           }
         } catch {
-          // No chatSessions dir or can't read
+          // No transcripts dir
         }
       }
       if (candidates.length > 0) {
@@ -146,243 +137,70 @@ class VsCodeAdapter extends BaseSourceAdapter {
     }
 
     try {
-      const parsedSession = await this._parseSessionFile(session.filePath);
-      if (!parsedSession) {
-        return [];
+      const events = await this.readJsonlEvents(session.filePath);
+
+      // Inject synthetic user.message at the start if chatSessions has user prompt
+      // and the transcript doesn't start with one
+      if (session._chatSessionInfo?.userMessage && events.length > 0) {
+        const hasUserMsgAtStart = events.some((e, i) =>
+          i < 3 && (e.type === 'user.message' || e.type === 'user' || e.type === 'request')
+        );
+        if (!hasUserMsgAtStart) {
+          const sessionStart = events.find(e => e.type === 'session.start');
+          const startTs = sessionStart?.timestamp || events[0]?.timestamp;
+          events.splice(sessionStart ? 1 : 0, 0, {
+            type: 'user.message',
+            id: 'synthetic-user-msg-0',
+            timestamp: startTs,
+            data: {
+              content: session._chatSessionInfo.userMessage,
+              message: session._chatSessionInfo.userMessage,
+              _synthetic: true
+            },
+            _synthetic: true
+          });
+        }
       }
 
-      let events = this._expandVsCodeEvents(parsedSession.parsed.allEvents);
-      events = await this._applyFileMtimeFallback(events, session.filePath);
-      return this._expandVsCodeToTimelineFormat(events);
+      return events;
     } catch (err) {
       console.error(`[VSCode readEvents] Error reading session ${session.id}:`, err);
       return [];
     }
   }
 
-  buildTimeline(events, _session) {
-    const turns = [];
-    let turnId = 0;
-    const allSubagentIds = new Set();
-
-    for (let i = 0; i < events.length; i++) {
-      const event = events[i];
-
-      if (event.type !== 'user.message') {
-        continue;
-      }
-
-      turnId++;
-      const turn = {
-        id: `turn-${turnId}`,
-        type: 'user-request',
-        message: event.data?.message || '',
-        startTime: event.timestamp,
-        endTime: event.timestamp,
-        assistantTurns: [],
-        subagents: []
-      };
-
-      const turnSubagentIds = new Set();
-      let assistantId = 0;
-      let j = i + 1;
-
-      while (j < events.length && events[j].type !== 'user.message') {
-        const nextEvent = events[j];
-
-        if (nextEvent.type === 'assistant.message') {
-          assistantId++;
-          turn.endTime = nextEvent.timestamp || turn.endTime;
-
-          const assistantTurn = {
-            id: `assistant-${assistantId}`,
-            startTime: nextEvent.timestamp,
-            endTime: nextEvent.timestamp,
-            tools: []
-          };
-
-          if (Array.isArray(nextEvent.data?.tools)) {
-            for (const tool of nextEvent.data.tools) {
-              assistantTurn.tools.push({
-                name: tool.name,
-                startTime: tool.startTime || nextEvent.timestamp,
-                endTime: tool.endTime || nextEvent.timestamp,
-                status: tool.status || 'completed',
-                input: tool.input,
-                result: tool.result
-              });
-            }
-          }
-
-          const subAgentId = nextEvent.data?.subAgentId;
-          if (subAgentId && !turnSubagentIds.has(subAgentId)) {
-            turnSubagentIds.add(subAgentId);
-            allSubagentIds.add(subAgentId);
-            turn.subagents.push({
-              id: subAgentId,
-              name: nextEvent.data?.subAgentName || subAgentId,
-              startTime: nextEvent.timestamp,
-              endTime: nextEvent.timestamp
-            });
-          }
-
-          turn.assistantTurns.push(assistantTurn);
-        }
-
-        j++;
-      }
-
-      turns.push(turn);
-    }
-
-    const totalTools = turns.reduce((sum, turn) => (
-      sum + turn.assistantTurns.reduce((assistantSum, assistantTurn) => assistantSum + assistantTurn.tools.length, 0)
-    ), 0);
-
-    return {
-      turns,
-      summary: {
-        totalTurns: turns.length,
-        totalAssistantTurns: turns.reduce((sum, turn) => sum + turn.assistantTurns.length, 0),
-        totalTools,
-        totalSubagents: allSubagentIds.size,
-        startTime: events[0]?.timestamp,
-        endTime: events[events.length - 1]?.timestamp
-      }
-    };
+  buildTimeline(_events, _session) {
+    // All sessions are transcripts now — fall through to _buildCopilotTimeline via source dispatch
+    return null;
   }
 
   // --- Private helpers ---
 
   async _scanWorkspaceDir(workspaceHashDir) {
-    const chatSessionsDir = path.join(workspaceHashDir, 'chatSessions');
-    try {
-      await fs.access(chatSessionsDir);
-    } catch {
-      return [];
-    }
-
     const workspaceHash = path.basename(workspaceHashDir);
     const realWorkspacePath = await this._resolveWorkspacePath(workspaceHashDir);
-
-    const entries = await fs.readdir(chatSessionsDir);
-    const jsonFiles = entries.filter(e => (e.endsWith('.json') || e.endsWith('.jsonl')) && !shouldSkipEntry(e));
-    if (jsonFiles.length === 0) return [];
-
     const sessions = [];
-    for (const file of jsonFiles) {
-      const fullPath = path.join(chatSessionsDir, file);
-      try {
-        const stats = await fs.stat(fullPath);
-        const parsedSession = await this._parseSessionFile(fullPath);
-        if (!parsedSession) continue;
 
-        const { sessionJson } = parsedSession;
-
-        const sessionId = sessionJson.sessionId || path.basename(file).replace(/\.jsonl?$/, '');
-        const requests = sessionJson.requests || [];
-        if (requests.length === 0) continue;
-
-        const statsWithPath = { ...stats, filePath: fullPath };
-        const session = this._buildSession(
-          sessionId, requests, sessionJson, statsWithPath, workspaceHash,
-          realWorkspacePath || workspaceHashDir
-        );
-        sessions.push(session);
-      } catch (err) {
-        console.warn(`[VSCode scan] Skipping malformed session file ${fullPath}: ${err.message}`);
+    const transcriptsDir = path.join(workspaceHashDir, 'GitHub.copilot-chat', 'transcripts');
+    try {
+      await fs.access(transcriptsDir);
+      const entries = await fs.readdir(transcriptsDir);
+      const jsonlFiles = entries.filter(e => e.endsWith('.jsonl') && !shouldSkipEntry(e));
+      for (const file of jsonlFiles) {
+        const fullPath = path.join(transcriptsDir, file);
+        try {
+          const stats = await fs.stat(fullPath);
+          const session = await this._buildTranscriptSession(
+            file, fullPath, stats, workspaceHash, realWorkspacePath
+          );
+          if (session) sessions.push(session);
+        } catch (err) {
+          console.warn(`[VSCode scan] Skipping transcript ${fullPath}: ${err.message}`);
+        }
       }
-    }
+    } catch { /* no transcripts dir */ }
+
     return sessions;
-  }
-
-  async _parseSessionFile(filePath) {
-    const raw = await fs.readFile(filePath, 'utf-8');
-    return this._parseSessionContent(raw, filePath);
-  }
-
-  _parseSessionContent(raw, filePath = 'unknown') {
-    const trimmedRaw = raw.trim();
-    if (!trimmedRaw) {
-      return null;
-    }
-
-    try {
-      const parsedObject = JSON.parse(trimmedRaw);
-      if (parsedObject && typeof parsedObject === 'object' && !Array.isArray(parsedObject)) {
-        return {
-          sessionJson: parsedObject,
-          parsed: this._parser.parseVsCode(parsedObject)
-        };
-      }
-    } catch {
-      // Not a single JSON object; fall through to JSONL parsing.
-    }
-
-    const lines = trimmedRaw.split('\n').filter(line => line.trim());
-    const parsedLines = [];
-
-    for (let index = 0; index < lines.length; index++) {
-      try {
-        parsedLines.push(JSON.parse(lines[index]));
-      } catch (err) {
-        console.warn(`[VSCode parse] Failed to parse ${filePath} line ${index + 1}: ${err.message}`);
-        return null;
-      }
-    }
-
-    if (parsedLines.length === 0) {
-      return null;
-    }
-
-    if (this._parser.canParse(parsedLines)) {
-      return {
-        sessionJson: this._parser.replayMutations(parsedLines),
-        parsed: this._parser.parseJsonl(parsedLines)
-      };
-    }
-
-    if (parsedLines.length === 1 && parsedLines[0] && typeof parsedLines[0] === 'object') {
-      return {
-        sessionJson: parsedLines[0],
-        parsed: this._parser.parseVsCode(parsedLines[0])
-      };
-    }
-
-    console.warn(`[VSCode parse] Unsupported session format in ${filePath}`);
-    return null;
-  }
-
-  _parseJsonl(raw, filePath = 'unknown') {
-    return this._parseSessionContent(raw, filePath)?.sessionJson || null;
-  }
-
-  async _applyFileMtimeFallback(events, filePath) {
-    if (!events.length) {
-      return events;
-    }
-
-    try {
-      const stats = await fs.stat(filePath);
-      const fileMtime = new Date(stats.mtime).toISOString();
-      const lastEvent = events[events.length - 1];
-
-      if (!lastEvent?.timestamp) {
-        return events;
-      }
-
-      const lastEventTime = new Date(lastEvent.timestamp).getTime();
-      const fileTime = new Date(fileMtime).getTime();
-      const diffSeconds = (fileTime - lastEventTime) / 1000;
-
-      if (diffSeconds > 10) {
-        lastEvent.timestamp = fileMtime;
-      }
-    } catch (err) {
-      console.error('[VSCode] Error getting file mtime:', err);
-    }
-
-    return events;
   }
 
   async _resolveWorkspacePath(workspaceHashDir) {
@@ -405,7 +223,8 @@ class VsCodeAdapter extends BaseSourceAdapter {
             return path.resolve(wsDir, ws.folders[0].path);
           }
         } catch {
-          // Ignore nested read errors
+          // Can't read the workspace file (e.g. running on a different machine).
+          // Return null rather than a misleading internal VSCode path.
         }
       }
     } catch {
@@ -414,185 +233,105 @@ class VsCodeAdapter extends BaseSourceAdapter {
     return null;
   }
 
-  _buildSession(sessionId, requests, sessionJson, stats, workspaceHash, workspaceCwd) {
-    const firstReq = requests[0];
-    const lastReq = requests[requests.length - 1];
+  /**
+   * Build a Session from a copilot-agent transcript file.
+   * Reuses the same metadata extraction as CopilotAdapter.
+   */
+  async _buildTranscriptSession(file, fullPath, stats, workspaceHash, workspaceCwd) {
+    const sessionId = file.replace('.jsonl', '');
+    const optimizedMetadata = await getSessionMetadataOptimized(fullPath);
+    const sessionStatus = computeSessionStatus(optimizedMetadata);
 
-    const createdAt = sessionJson.creationDate
-      ? new Date(sessionJson.creationDate)
-      : (firstReq.timestamp ? new Date(firstReq.timestamp) : stats.birthtime);
+    // Try to extract agent info from chatSessions file
+    const chatSessionInfo = await this._extractChatSessionInfo(fullPath, sessionId);
 
-    const lastReqTime = lastReq.timestamp ? new Date(lastReq.timestamp) : null;
-    const fallbackUpdatedAt = sessionJson.lastMessageDate
-      ? new Date(sessionJson.lastMessageDate)
-      : (lastReqTime || stats.mtime);
+    const createdAt = optimizedMetadata.startTime
+      ? new Date(optimizedMetadata.startTime)
+      : stats.birthtime;
+    const updatedAt = optimizedMetadata.lastEventTime
+      ? new Date(optimizedMetadata.lastEventTime)
+      : stats.mtime;
 
-    const lastTerminalTime = this._extractLastTerminalTimestamp(requests);
-    const effectiveEndTime = lastTerminalTime || lastReqTime || fallbackUpdatedAt;
+    // Prefer chatSession user message over transcript firstUserMessage
+    const firstUserMessage = chatSessionInfo.userMessage || optimizedMetadata.firstUserMessage;
 
-    const isWip = (Date.now() - effectiveEndTime.getTime()) < 15 * 60 * 1000;
-    const userText = this._extractUserText(firstReq.message);
-
-    return new Session(sessionId, 'file', {
+    const session = new Session(sessionId, 'file', {
       source: 'vscode',
-      filePath: stats.filePath,
-      directory: path.dirname(stats.filePath),
+      filePath: fullPath,
+      directory: path.dirname(fullPath),
       createdAt,
-      updatedAt: effectiveEndTime,
-      summary: userText ? userText.slice(0, 120) : `VSCode chat (${requests.length} requests)`,
+      updatedAt,
+      summary: firstUserMessage
+        ? firstUserMessage.slice(0, 120)
+        : 'Copilot agent session',
       hasEvents: true,
-      eventCount: requests.reduce((s, r) => s + (r.response || []).length, 0) + requests.length * 2 + 1,
-      duration: effectiveEndTime.getTime() - createdAt.getTime(),
-      sessionStatus: isWip ? 'wip' : 'completed',
-      selectedModel: firstReq.modelId || null,
-      copilotVersion: firstReq.agent?.extensionVersion || null,
-      workspace: {
-        cwd: workspaceCwd,
-        workspaceHash
-      },
+      eventCount: optimizedMetadata.eventCount || 0,
+      duration: optimizedMetadata.duration,
+      sessionStatus,
+      selectedModel: chatSessionInfo.modelId || optimizedMetadata.selectedModel || null,
+      copilotVersion: optimizedMetadata.copilotVersion || null,
+      workspace: workspaceCwd ? { cwd: workspaceCwd, workspaceHash } : { workspaceHash },
+      agentName: chatSessionInfo.agentName || null,
     });
+    session._isTranscript = true;
+    session._chatSessionInfo = chatSessionInfo;
+    return session;
   }
 
-  _expandVsCodeEvents(events) {
-    const result = [];
-    let pendingTools = [];
-    let pendingParentId = null;
-    let pendingTs = null;
-    let pendingIdx = 0;
-    let pendingSubAgentId = null;
-    let pendingSubAgentName = null;
+  /**
+   * Extract agent name, model, and user message from the chatSessions JSONL.
+   * Path: <hash>/chatSessions/<sessionId>.jsonl (sibling of transcripts dir).
+   */
+  async _extractChatSessionInfo(transcriptPath, sessionId) {
+    const result = { agentName: null, modelId: null, userMessage: null };
+    try {
+      // Navigate from transcripts dir to chatSessions dir
+      const hashDir = path.resolve(path.dirname(transcriptPath), '..', '..');
+      const chatSessionPath = path.join(hashDir, 'chatSessions', `${sessionId}.jsonl`);
+      await fs.access(chatSessionPath);
 
-    const flushTools = () => {
-      if (pendingTools.length === 0) return;
-      result.push({
-        type: 'assistant.message',
-        id: `vscode-tools-${pendingIdx}`,
-        timestamp: pendingTs,
-        parentId: pendingParentId,
-        data: {
-          message: '',
-          content: '',
-          tools: pendingTools,
-          subAgentId: pendingSubAgentId,
-          subAgentName: pendingSubAgentName
-        },
-        _synthetic: true
-      });
-      pendingTools = [];
-      pendingSubAgentId = null;
-      pendingSubAgentName = null;
-    };
+      const raw = await fs.readFile(chatSessionPath, 'utf-8');
+      const lines = raw.trim().split('\n');
 
-    for (let i = 0; i < events.length; i++) {
-      const event = events[i];
-      if (event.type === 'tool.invocation') {
-        const eventSubAgentId = event.data?.subAgentId || null;
-        if (pendingTools.length > 0 && eventSubAgentId !== pendingSubAgentId) {
-          flushTools();
+      for (const line of lines) {
+        const entry = JSON.parse(line);
+
+        // kind=0: initial state with requests array
+        if (entry.kind === 0 && entry.v?.requests?.[0]) {
+          const req = entry.v.requests[0];
+          // User message
+          if (req.message?.text) {
+            result.userMessage = req.message.text;
+          }
+          // Model
+          if (req.modelId) {
+            result.modelId = req.modelId;
+          }
+          // Agent (built-in agent mode)
+          if (req.agent?.id && req.agent.id !== 'github.copilot.editsAgent') {
+            result.agentName = req.agent.id;
+          }
         }
-        if (pendingTools.length === 0) {
-          pendingParentId = event.parentId;
-          pendingTs = event.timestamp;
-          pendingIdx = i;
-          pendingSubAgentId = eventSubAgentId;
-          pendingSubAgentName = event.data?.subAgentName || null;
+
+        // kind=1: diff entries — look for agent mode with file-based agent
+        if (entry.kind === 1) {
+          const keys = entry.k || [];
+          const val = entry.v;
+          if (keys.includes('mode') && val?.kind === 'agent' && val?.id) {
+            const agentId = val.id;
+            // Extract agent name from file path: .../agents/name.agent.md → name
+            const fileMatch = agentId.match(/agents\/([^/]+)\.agent\.md$/);
+            if (fileMatch) {
+              result.agentName = fileMatch[1];
+            }
+          }
         }
-        if (event.data?.tool) {
-          pendingTools.push(event.data.tool);
-        }
-        continue;
       }
-
-      flushTools();
-      result.push(event);
+    } catch {
+      // chatSessions file not found or unreadable — not critical
     }
-
-    flushTools();
     return result;
-  }
-
-  _expandVsCodeToTimelineFormat(events) {
-    const expanded = [];
-
-    for (let i = 0; i < events.length; i++) {
-      const event = events[i];
-      expanded.push(event);
-
-      if (event.type !== 'assistant.message' || !Array.isArray(event.data?.tools) || event.data.tools.length === 0) {
-        continue;
-      }
-
-      event.data.tools.forEach((tool, idx) => {
-        if (!tool.id || !tool.name) {
-          return;
-        }
-
-        const toolStartTime = tool.startTime || event.timestamp;
-        const toolEndTime = tool.endTime || event.timestamp;
-
-        expanded.push({
-          type: 'tool.execution_start',
-          id: `${tool.id}-start`,
-          timestamp: toolStartTime,
-          parentId: event.id,
-          data: {
-            toolCallId: tool.id,
-            toolName: tool.name,
-            tool: tool.name,
-            arguments: tool.input || {}
-          },
-          _synthetic: true,
-          _fileIndex: event._fileIndex ? event._fileIndex + 0.1 + (idx * 0.02) : undefined
-        });
-
-        expanded.push({
-          type: 'tool.execution_complete',
-          id: `${tool.id}-complete`,
-          timestamp: toolEndTime,
-          parentId: tool.id,
-          data: {
-            toolCallId: tool.id,
-            toolName: tool.name,
-            tool: tool.name,
-            result: tool.result || null,
-            error: tool.error || (tool.status === 'error' ? 'Tool execution failed' : null),
-            isError: tool.status === 'error'
-          },
-          _synthetic: true,
-          _fileIndex: event._fileIndex ? event._fileIndex + 0.15 + (idx * 0.02) : undefined
-        });
-      });
-    }
-
-    return expanded;
-  }
-
-  _extractLastTerminalTimestamp(requests) {
-    let maxTs = 0;
-
-    function walk(obj) {
-      if (!obj || typeof obj !== 'object') return;
-      if (Array.isArray(obj)) { obj.forEach(walk); return; }
-      if (obj.terminalCommandState && typeof obj.terminalCommandState.timestamp === 'number') {
-        const ts = obj.terminalCommandState.timestamp;
-        if (ts > 1_000_000_000_000 && ts < 9_999_999_999_999 && ts > maxTs) maxTs = ts;
-      }
-      for (const val of Object.values(obj)) walk(val);
-    }
-
-    for (const req of requests) walk(req.response);
-    return maxTs > 0 ? new Date(maxTs) : null;
-  }
-
-  _extractUserText(message) {
-    if (!message) return '';
-    if (typeof message.text === 'string') return message.text;
-    if (Array.isArray(message.parts)) {
-      return message.parts.filter(p => p.kind === 'text').map(p => p.text || '').join('');
-    }
-    return '';
   }
 }
 
 module.exports = VsCodeAdapter;
-

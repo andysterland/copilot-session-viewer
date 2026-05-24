@@ -29,7 +29,7 @@
 
   console.log('Initializing Vue app...');
 
-  const { createApp, ref, computed, onMounted, onBeforeUnmount, watch } = Vue;
+  const { createApp, ref, computed, onMounted, onBeforeUnmount, watch, nextTick } = Vue;
   const { DynamicScroller, DynamicScrollerItem } = window.VueVirtualScroller;
 
   const app = createApp({
@@ -82,6 +82,9 @@
     const scrollerRef = ref(null);
     const visibleRange = ref({ start: 0, end: 0 });
     const selectedSubagent = ref(null); // null = all events, toolCallId = specific subagent
+    const subagentDropdownOpen = ref(false);
+    const subagentSearchQuery = ref('');
+    const subagentSearchRef = ref(null);
     const typeFilterOpen = ref(false); // Event type dropdown open state
 
     // Active filter count (computed)
@@ -127,6 +130,13 @@
 
     watch(debouncedSearchText, () => {
       cleanupExpansionState();
+    });
+
+    // Auto-focus subagent search input when dropdown opens
+    watch(subagentDropdownOpen, (open) => {
+      if (open) {
+        nextTick(() => { subagentSearchRef.value?.focus(); });
+      }
     });
 
     // Async loading state
@@ -369,9 +379,20 @@
       if (subagentInfo.size === 0) return [];
       const list = [];
       for (const [toolCallId, info] of subagentInfo) {
-        list.push({ toolCallId, name: info.name, colorIndex: info.colorIndex });
+        list.push({ toolCallId, name: info.name, colorIndex: info.colorIndex, meta: info.meta || {} });
       }
       return list;
+    });
+
+    // Filtered subagent list for search
+    const filteredSubagentList = computed(() => {
+      const q = subagentSearchQuery.value.toLowerCase().trim();
+      if (!q) return subagentList.value;
+      return subagentList.value.filter(sa => {
+        const m = sa.meta || {};
+        const searchable = [sa.name, m.taskName, m.taskDescription, m.agentName, m.agentType, m.agentDescription, m.model].filter(Boolean).join(' ').toLowerCase();
+        return searchable.includes(q);
+      });
     });
 
     // Token usage for the currently selected subagent (computed from events)
@@ -883,6 +904,8 @@
 
     const selectSubagent = (toolCallId) => {
       selectedSubagent.value = toolCallId;
+      subagentDropdownOpen.value = false;
+      subagentSearchQuery.value = '';
       // Reset type filter only when switching into a specific subagent view
       if (toolCallId) {
         currentFilter.value = 'all';
@@ -1099,6 +1122,8 @@
     onMounted(async () => {
       // Close type filter dropdown on outside click
       document.addEventListener('click', closeTypeFilter);
+      // Close subagent dropdown on outside click
+      document.addEventListener('click', () => { subagentDropdownOpen.value = false; });
 
       // Load events asynchronously
       try {
@@ -1588,10 +1613,15 @@
       getToolGroups,
       getSubagentInfo,
       getSubagentColor,
+      subagentOwnership,
       setFilter,
       selectSubagent,
       selectedSubagent,
       subagentList,
+      filteredSubagentList,
+      subagentDropdownOpen,
+      subagentSearchQuery,
+      subagentSearchRef,
       subagentTokenUsage,
       SUBAGENT_COLORS,
       typeFilterOpen,
@@ -1691,6 +1721,10 @@
                   <tr v-if="metadata.model">
                     <td>Model</td>
                     <td>{{ metadata.model }}</td>
+                  </tr>
+                  <tr v-if="metadata.agentName">
+                    <td>Agent</td>
+                    <td>🤖 {{ metadata.agentName }}</td>
                   </tr>
                   <tr v-if="metadata.repo">
                     <td>Repo</td>
@@ -1945,18 +1979,53 @@
 
               <div class="filter-bar-divider"></div>
 
-              <!-- Subagent selector -->
-              <div v-if="subagentList.length > 0" class="subagent-selector">
-                <select
-                  :value="selectedSubagent || ''"
-                  @change="selectSubagent($event.target.value || null)"
-                  class="subagent-dropdown"
+              <!-- Subagent selector (rich dropdown with search) -->
+              <div v-if="subagentList.length > 0" class="subagent-selector" style="position:relative">
+                <button
+                  class="subagent-dropdown-trigger"
+                  @click.stop="subagentDropdownOpen = !subagentDropdownOpen"
                 >
-                  <option value="">🤖 All Agents</option>
-                  <option v-for="sa in subagentList" :key="sa.toolCallId" :value="sa.toolCallId">
-                    🤖 {{ sa.name }}
-                  </option>
-                </select>
+                  <span class="subagent-trigger-icon">🤖</span>
+                  <span class="subagent-trigger-label">{{ selectedSubagent ? (subagentList.find(s => s.toolCallId === selectedSubagent)?.name || 'Agent') : 'All Agents' }}</span>
+                  <span class="subagent-trigger-arrow">▾</span>
+                </button>
+                <div v-if="subagentDropdownOpen" class="subagent-dropdown-panel" @click.stop>
+                  <input
+                    class="subagent-search-input"
+                    v-model="subagentSearchQuery"
+                    placeholder="Search agents..."
+                    ref="subagentSearchRef"
+                    @keydown.escape="subagentDropdownOpen = false"
+                  />
+                  <div class="subagent-dropdown-list">
+                    <div
+                      class="subagent-dropdown-item"
+                      :class="{ active: !selectedSubagent }"
+                      @click="selectSubagent(null)"
+                    >
+                      <div class="subagent-item-name">🤖 All Agents</div>
+                    </div>
+                    <div
+                      v-for="sa in filteredSubagentList"
+                      :key="sa.toolCallId"
+                      class="subagent-dropdown-item"
+                      :class="{ active: selectedSubagent === sa.toolCallId }"
+                      @click="selectSubagent(sa.toolCallId)"
+                    >
+                      <div class="subagent-item-color" :style="{ background: SUBAGENT_COLORS[sa.colorIndex % SUBAGENT_COLORS.length] }"></div>
+                      <div class="subagent-item-body">
+                        <div class="subagent-item-name">{{ sa.name }}</div>
+                        <div v-if="sa.meta.taskName || sa.meta.agentType || sa.meta.model" class="subagent-item-meta">
+                          <span v-if="sa.meta.taskName" class="subagent-meta-tag">{{ sa.meta.taskName }}</span>
+                          <span v-if="sa.meta.agentType" class="subagent-meta-tag dim">{{ sa.meta.agentType }}</span>
+                          <span v-if="sa.meta.model" class="subagent-meta-tag dim">{{ sa.meta.model }}</span>
+                        </div>
+                        <div v-if="sa.meta.agentDescription" class="subagent-item-desc">{{ sa.meta.agentDescription }}</div>
+                      </div>
+                    </div>
+                    <div v-if="filteredSubagentList.length === 0" class="subagent-dropdown-empty">No matches</div>
+                  </div>
+                </div>
                 <span v-if="subagentTokenUsage" class="subagent-usage-badge">
                   {{ subagentTokenUsage.eventCount }} events · {{ formatDuration(subagentTokenUsage.durationMs) }}
                 </span>
@@ -2072,6 +2141,7 @@
                   <div class="subagent-divider-line-left" :style="{ background: getSubagentColor(item) || '#58a6ff' }"></div>
                   <span class="subagent-divider-text" :style="{ color: getSubagentColor(item) || '#58a6ff', borderColor: getSubagentColor(item) || '#58a6ff', background: (getSubagentColor(item) || '#58a6ff') + '1a' }">
                     🤖 {{ item.data?.agentDisplayName || item.data?.agentName || 'SubAgent' }}
+                    <span v-if="subagentOwnership.subagentInfo.get(item.data?.toolCallId)?.meta?.model" class="subagent-divider-model">· {{ subagentOwnership.subagentInfo.get(item.data?.toolCallId).meta.model }}</span>
                     {{ item.type === 'subagent.started' ? 'Start ▶' : item.type === 'subagent.completed' ? 'Complete ✓' : 'Failed ✗' }}
                   </span>
                   <div class="subagent-divider-line-right" :style="{ background: getSubagentColor(item) || '#58a6ff' }"></div>
@@ -2097,7 +2167,7 @@
                       :title="'Filter to ' + getSubagentInfo(item).name"
                       @click.stop="selectSubagent(getSubagentInfo(item).toolCallId)"
                     >🤖 {{ getSubagentInfo(item).name }}</span>
-                    <span v-if="metadata.source !== 'vscode'" class="event-timestamp">{{ formatTime(item.timestamp) }}</span>
+                    <span class="event-timestamp">{{ formatTime(item.timestamp) }}</span>
                   </div>
 
                   <!-- Abort event: show reason -->
@@ -2182,6 +2252,39 @@
                         {{ expandedContent['compaction-' + item.stableId] ? 'Hide summary ▲' : 'Show summary ▼' }}
                       </button>
                       <div v-if="expandedContent['compaction-' + item.stableId]" class="event-content" style="margin-top: 8px;" v-html="renderMarkdown(item.data.summaryContent)"></div>
+                    </div>
+                  </div>
+
+                  <!-- Hook event: compact summary with collapsible args/result -->
+                  <div v-else-if="item.data?.hookType" class="hook-content">
+                    <div class="hook-summary">
+                      <span style="color: #8b949e;">{{ item.data.hookType }}</span>
+                      <span v-if="item.data.hookToolName" style="color: #8b949e;"> → </span>
+                      <span v-if="item.data.hookToolName" style="color: #c9d1d9;">{{ item.data.hookToolName }}</span>
+                      <span v-if="item.data.hookDurationMs != null" style="color: #7d8590; margin-left: 8px;">{{ item.data.hookDurationMs }}ms</span>
+                      <span v-if="item.data.hookSuccess === true" style="color: #3fb950; margin-left: 4px;">✓</span>
+                      <span v-if="item.data.hookSuccess === false" style="color: #ff7b72; margin-left: 4px;">✗</span>
+                    </div>
+                    <div v-if="item.data.hookArgs && Object.keys(item.data.hookArgs).length > 0" class="hook-section">
+                      <div class="hook-section-header" @click="toggleContent('hook-args-' + item.stableId)">
+                        <span class="tool-expand-icon">{{ expandedContent['hook-args-' + item.stableId] ? '▼' : '▶' }}</span>
+                        <span style="color: #8b949e;">Arguments</span>
+                      </div>
+                      <div v-if="expandedContent['hook-args-' + item.stableId]" class="hook-section-body">
+                        <pre>{{ JSON.stringify(item.data.hookArgs, null, 2) }}</pre>
+                      </div>
+                    </div>
+                    <div v-if="item.data.hookResult" class="hook-section">
+                      <div class="hook-section-header" @click="toggleContent('hook-result-' + item.stableId)">
+                        <span class="tool-expand-icon">{{ expandedContent['hook-result-' + item.stableId] ? '▼' : '▶' }}</span>
+                        <span style="color: #8b949e;">Result</span>
+                      </div>
+                      <div v-if="expandedContent['hook-result-' + item.stableId]" class="hook-section-body">
+                        <pre>{{ item.data.hookResult }}</pre>
+                      </div>
+                    </div>
+                    <div v-if="item.data.hookError" style="color: #ff7b72; margin-top: 4px;">
+                      Error: {{ item.data.hookError }}
                     </div>
                   </div>
 

@@ -91,12 +91,14 @@ async function getSessionMetadataOptimized(filePath, maxMessageLength = 500) {
     let copilotVersion = null;
     let selectedModel = null;
     let hasSessionEnd = false;
+    let eventCount = 0;
 
     for await (const line of rl) {
       if (!line.trim()) continue;
 
       try {
         const event = JSON.parse(line);
+        eventCount++;
 
         // Extract timestamp for duration calculation
         if (event.timestamp) {
@@ -108,8 +110,13 @@ async function getSessionMetadataOptimized(filePath, maxMessageLength = 500) {
         }
 
         // Get first user message
-        if (!firstUserMessage && event.type === 'user.message') {
-          const msg = event.data?.message || event.data?.content || event.data?.text || '';
+        if (!firstUserMessage && (event.type === 'user.message' || event.type === 'request')) {
+          let msg = event.data?.message || event.data?.content || event.data?.text || '';
+          // Copilot-cli request format: payload.messages[].content
+          if (!msg && event.type === 'request' && Array.isArray(event.payload?.messages)) {
+            const userMsg = event.payload.messages.find(m => m.role === 'user');
+            if (userMsg) msg = typeof userMsg.content === 'string' ? userMsg.content : '';
+          }
           if (msg) {
             firstUserMessage = msg.length > maxMessageLength ? msg.substring(0, maxMessageLength) + '...' : msg;
           }
@@ -151,6 +158,7 @@ async function getSessionMetadataOptimized(filePath, maxMessageLength = 500) {
     return {
       firstUserMessage: firstUserMessage || '',
       duration,
+      eventCount,
       copilotVersion: copilotVersion || null,
       selectedModel: selectedModel || null,
       hasSessionEnd,
@@ -162,6 +170,7 @@ async function getSessionMetadataOptimized(filePath, maxMessageLength = 500) {
     return {
       firstUserMessage: '',
       duration: null,
+      eventCount: 0,
       copilotVersion: null,
       selectedModel: null,
       hasSessionEnd: false,

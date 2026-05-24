@@ -23,6 +23,7 @@ function buildMetadata(session) {
     updated: session.updatedAt,
     copilotVersion: session.copilotVersion,
     modernizeVersion: session.modernizeVersion,
+    agentName: session.agentName,
     sessionStatus: session.sessionStatus
   };
 }

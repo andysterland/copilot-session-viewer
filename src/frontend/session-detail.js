@@ -390,7 +390,7 @@
       if (!q) return subagentList.value;
       return subagentList.value.filter(sa => {
         const m = sa.meta || {};
-        const searchable = [sa.name, m.taskName, m.taskDescription, m.agentName, m.agentType, m.agentDescription].filter(Boolean).join(' ').toLowerCase();
+        const searchable = [sa.name, m.taskName, m.taskDescription, m.agentName, m.agentType, m.agentDescription, m.model].filter(Boolean).join(' ').toLowerCase();
         return searchable.includes(q);
       });
     });
@@ -1613,6 +1613,7 @@
       getToolGroups,
       getSubagentInfo,
       getSubagentColor,
+      subagentOwnership,
       setFilter,
       selectSubagent,
       selectedSubagent,
@@ -2010,9 +2011,10 @@
                       <div class="subagent-item-color" :style="{ background: SUBAGENT_COLORS[sa.colorIndex % SUBAGENT_COLORS.length] }"></div>
                       <div class="subagent-item-body">
                         <div class="subagent-item-name">{{ sa.name }}</div>
-                        <div v-if="sa.meta.taskName || sa.meta.agentType" class="subagent-item-meta">
+                        <div v-if="sa.meta.taskName || sa.meta.agentType || sa.meta.model" class="subagent-item-meta">
                           <span v-if="sa.meta.taskName" class="subagent-meta-tag">{{ sa.meta.taskName }}</span>
                           <span v-if="sa.meta.agentType" class="subagent-meta-tag dim">{{ sa.meta.agentType }}</span>
+                          <span v-if="sa.meta.model" class="subagent-meta-tag dim">{{ sa.meta.model }}</span>
                         </div>
                         <div v-if="sa.meta.agentDescription" class="subagent-item-desc">{{ sa.meta.agentDescription }}</div>
                       </div>
@@ -2135,6 +2137,7 @@
                   <div class="subagent-divider-line-left" :style="{ background: getSubagentColor(item) || '#58a6ff' }"></div>
                   <span class="subagent-divider-text" :style="{ color: getSubagentColor(item) || '#58a6ff', borderColor: getSubagentColor(item) || '#58a6ff', background: (getSubagentColor(item) || '#58a6ff') + '1a' }">
                     🤖 {{ item.data?.agentDisplayName || item.data?.agentName || 'SubAgent' }}
+                    <span v-if="subagentOwnership.subagentInfo.get(item.data?.toolCallId)?.meta?.model" class="subagent-divider-model">· {{ subagentOwnership.subagentInfo.get(item.data?.toolCallId).meta.model }}</span>
                     {{ item.type === 'subagent.started' ? 'Start ▶' : item.type === 'subagent.completed' ? 'Complete ✓' : 'Failed ✗' }}
                   </span>
                   <div class="subagent-divider-line-right" :style="{ background: getSubagentColor(item) || '#58a6ff' }"></div>

@@ -181,6 +181,21 @@ function computeSubagentOwnership(events) {
     }
   }
 
+  // 8. Extract model for each subagent from its owned events
+  for (const [tcid, info] of subagentInfo) {
+    for (const ev of events) {
+      const owned = ownerMap.get(ev.stableId) === tcid ||
+        (ev._subagent?.id === tcid) ||
+        (ev.data?.subAgentId === tcid);
+      if (!owned) continue;
+      const model = ev.model || ev.data?.model;
+      if (model) {
+        info.meta.model = model;
+        break;
+      }
+    }
+  }
+
   return { ownerMap, subagentInfo };
 }
 

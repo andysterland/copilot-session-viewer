@@ -1286,6 +1286,11 @@ class SessionService {
       return event.message.usage;
     }
 
+    // Copilot-cli: usage in payload.usage (Anthropic API response format)
+    if (event?.payload?.usage && typeof event.payload.usage === 'object') {
+      return event.payload.usage;
+    }
+
     return null;
   }
 
@@ -1318,7 +1323,7 @@ class SessionService {
    * @returns {string|null} Model name
    */
   _getClaudeEventModel(event) {
-    return event?.model || event?.message?.model || event?._originalMessage?.model || null;
+    return event?.model || event?.message?.model || event?._originalMessage?.model || event?.payload?.model || null;
   }
 
   /**
@@ -1904,6 +1909,9 @@ class SessionService {
     const expanded = [];
     let turnCounter = 0;
 
+    // Check if native subagent.started events exist (skip synthesis if so)
+    const hasNativeSubagentEvents = events.some(e => e.type === 'subagent.started');
+
     for (let i = 0; i < events.length; i++) {
       const event = events[i];
 
@@ -1980,6 +1988,32 @@ class SessionService {
         // Tools are attached to assistant event as data.tools array
         if (event.data?.tools && event.data.tools.length > 0) {
           event.data.tools.forEach((tool, idx) => {
+            const toolName = tool.start?.data?.toolName || tool.tool || '';
+            const isSubagentTool = toolName === 'runSubagent';
+
+            // Synthesize subagent.started from runSubagent tool calls
+            if (isSubagentTool && tool.start && !hasNativeSubagentEvents) {
+              const tcid = tool.start.data?.toolCallId || `synth-sa-${i}-${idx}`;
+              let args = tool.start.data?.arguments;
+              if (typeof args === 'string') {
+                try { args = JSON.parse(args); } catch (_e) { args = {}; }
+              }
+              const agentName = args?.description || args?.name || 'SubAgent';
+              expanded.push({
+                type: 'subagent.started',
+                id: `${tcid}-synth-start`,
+                timestamp: tool.start.timestamp || timestamp,
+                data: {
+                  toolCallId: tcid,
+                  agentName: agentName,
+                  agentDisplayName: agentName,
+                  agentDescription: args?.description || ''
+                },
+                _synthetic: true,
+                _fileIndex: event._fileIndex + 0.09 + (idx * 0.02)
+              });
+            }
+
             // tool.execution_start
             if (tool.start) {
               expanded.push({
@@ -1993,6 +2027,23 @@ class SessionService {
               expanded.push({
                 ...tool.complete,
                 _fileIndex: event._fileIndex + 0.15 + (idx * 0.02)
+              });
+            }
+
+            // Synthesize subagent.completed from runSubagent tool calls
+            if (isSubagentTool && !hasNativeSubagentEvents) {
+              const tcid = tool.start?.data?.toolCallId || `synth-sa-${i}-${idx}`;
+              const endTs = tool.complete?.timestamp || tool.start?.timestamp || timestamp;
+              expanded.push({
+                type: 'subagent.completed',
+                id: `${tcid}-synth-end`,
+                timestamp: endTs,
+                data: {
+                  toolCallId: tcid,
+                  result: 'Sub-agent completed'
+                },
+                _synthetic: true,
+                _fileIndex: event._fileIndex + 0.16 + (idx * 0.02)
               });
             }
           });

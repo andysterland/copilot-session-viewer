@@ -124,7 +124,7 @@ class SessionService {
     events = events.filter(e => e.type !== 'file-history-snapshot');
 
     // Normalize events to unified format (convert Claude format to standard)
-    const effectiveSource = (session.source === 'vscode' && session._isTranscript) ? 'copilot' : session.source;
+    const effectiveSource = session.source === 'vscode' ? 'copilot' : session.source;
     events = events.map(event => this._normalizeEvent(event, effectiveSource));
     
     // Load and merge sub-agent events (for both Copilot and Claude)
@@ -138,7 +138,7 @@ class SessionService {
       this._matchCopilotToolCalls(events);
       this._mergeHookEvents(events);
       events = this._expandCopilotToTimelineFormat(events);
-    } else if (session.source === 'vscode' && session._isTranscript) {
+    } else if (session.source === 'vscode') {
       // VSCode copilot-agent transcripts use the same format as copilot-cli
       this._matchCopilotToolCalls(events);
       this._mergeHookEvents(events);
@@ -1544,7 +1544,7 @@ class SessionService {
     }
 
     // Dispatch to source-specific builder
-    if (session.source === 'copilot' || (session.source === 'vscode' && session._isTranscript)) {
+    if (session.source === 'copilot' || session.source === 'vscode') {
       return this._buildCopilotTimeline(events, session);
     } else if (session.source === 'claude') {
       return this._buildClaudeTimeline(events, session);

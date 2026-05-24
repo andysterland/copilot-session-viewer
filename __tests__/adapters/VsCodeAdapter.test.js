@@ -16,130 +16,81 @@ describe('VsCodeAdapter', () => {
     await fs.promises.rm(tmpDir, { recursive: true, force: true });
   });
 
-  it('replays JSONL mutations with truncation and delete semantics', () => {
-    const sessionJson = adapter._parseJsonl([
-      JSON.stringify({
-        kind: 0,
-        v: {
-          sessionId: 'test-123',
-          tempField: 'remove-me',
-          requests: [{ requestId: 'req-1' }, { requestId: 'req-2' }, { requestId: 'req-3' }]
-        }
-      }),
-      JSON.stringify({
-        kind: 2,
-        k: ['requests'],
-        v: [{ requestId: 'req-4' }],
-        i: 1
-      }),
-      JSON.stringify({
-        kind: 3,
-        k: ['tempField']
-      })
-    ].join('\n'), 'session.jsonl');
+  it('reads transcript JSONL events (copilot-agent format)', async () => {
+    const sessionFile = path.join(tmpDir, 'session.jsonl');
+    const events = [
+      { type: 'user.message', timestamp: '2026-02-20T10:00:00.000Z', data: { message: 'Read the file' } },
+      { type: 'assistant.message', timestamp: '2026-02-20T10:00:01.000Z', data: { message: 'Reading...' } },
+      { type: 'tool.execution_start', timestamp: '2026-02-20T10:00:01.500Z', data: { toolCallId: 't1', toolName: 'copilot_readFile', arguments: { fsPath: '/repo/README.md' } } },
+      { type: 'tool.execution_complete', timestamp: '2026-02-20T10:00:02.000Z', data: { toolCallId: 't1', toolName: 'copilot_readFile', result: 'README content' } },
+    ];
+    await fs.promises.writeFile(sessionFile, events.map(e => JSON.stringify(e)).join('\n'));
 
-    expect(sessionJson.requests).toHaveLength(2);
-    expect(sessionJson.requests[0].requestId).toBe('req-1');
-    expect(sessionJson.requests[1].requestId).toBe('req-4');
-    expect(sessionJson.tempField).toBeUndefined();
-  });
-
-  it('reads events through the custom pipeline and expands tool executions', async () => {
-    const sessionFile = path.join(tmpDir, 'session.json');
-    await fs.promises.writeFile(sessionFile, JSON.stringify({
-      sessionId: 'vscode-events',
-      creationDate: '2026-02-20T10:00:00.000Z',
-      requests: [{
-        requestId: 'req-1',
-        timestamp: '2026-02-20T10:01:00.000Z',
-        message: { text: 'Read the file' },
-        modelId: 'gpt-4',
-        response: [
-          { kind: 'markdownContent', content: { value: 'Done' } },
-          {
-            kind: 'toolInvocationSerialized',
-            toolCallId: 'tool-1',
-            toolId: 'copilot_readFile',
-            isComplete: true,
-            toolSpecificData: {
-              input: { fsPath: '/repo/README.md' },
-              result: 'README.md'
-            }
-          }
-        ]
-      }]
-    }));
-
-    const events = await adapter.readEvents({
-      id: 'vscode-events',
-      filePath: sessionFile
+    const result = await adapter.readEvents({
+      id: 'test-transcript',
+      filePath: sessionFile,
+      _isTranscript: true,
     }, null);
 
-    expect(events.some(event => event.type === 'assistant.message' && event.data?.tools?.length > 0)).toBe(true);
-    expect(events.some(event => event.type === 'tool.execution_start')).toBe(true);
-    expect(events.some(event => event.type === 'tool.execution_complete')).toBe(true);
+    expect(result).toHaveLength(4);
+    expect(result[0].type).toBe('user.message');
+    expect(result[1].type).toBe('assistant.message');
+    expect(result[2].type).toBe('tool.execution_start');
+    expect(result[3].type).toBe('tool.execution_complete');
   });
 
-  it('reads pretty-printed json session files', async () => {
-    const sessionFile = path.join(tmpDir, 'pretty-session.json');
-    await fs.promises.writeFile(sessionFile, JSON.stringify({
-      sessionId: 'pretty-json',
-      creationDate: '2026-02-20T10:00:00.000Z',
-      requests: [{
-        requestId: 'req-1',
-        timestamp: '2026-02-20T10:01:00.000Z',
-        message: { text: 'Hello' },
-        modelId: 'gpt-4',
-        response: [
-          { kind: 'markdownContent', content: { value: 'Hi there' } }
-        ]
-      }]
-    }, null, 2));
-
-    const events = await adapter.readEvents({
-      id: 'pretty-json',
-      filePath: sessionFile
-    }, null);
-
-    expect(events.some(event => event.type === 'user.message')).toBe(true);
-    expect(events.some(event => event.type === 'assistant.message')).toBe(true);
+  it('buildTimeline returns null to fall through to copilot timeline builder', () => {
+    const timeline = adapter.buildTimeline([], { source: 'vscode' });
+    expect(timeline).toBeNull();
   });
 
-  it('builds a vscode timeline with assistant turns, tools, and subagents', () => {
-    const timeline = adapter.buildTimeline([
-      {
-        type: 'user.message',
-        timestamp: '2026-02-20T10:00:00.000Z',
-        data: { message: 'Please inspect the file' }
-      },
-      {
-        type: 'assistant.message',
-        timestamp: '2026-02-20T10:00:02.000Z',
-        data: {
-          message: 'Done',
-          tools: [{
-            id: 'tool-1',
-            name: 'copilot_readFile',
-            startTime: '2026-02-20T10:00:01.000Z',
-            endTime: '2026-02-20T10:00:02.000Z',
-            status: 'completed',
-            input: { file: 'README.md' },
-            result: 'README.md'
-          }],
-          subAgentId: 'agent-1',
-          subAgentName: 'reviewer'
-        }
-      }
-    ], { source: 'vscode' });
+  it('scans transcripts directory for JSONL sessions', async () => {
+    // Set up directory structure: <hash>/GitHub.copilot-chat/transcripts/session.jsonl
+    const hash = 'abc123';
+    const transcriptsDir = path.join(tmpDir, hash, 'GitHub.copilot-chat', 'transcripts');
+    await fs.promises.mkdir(transcriptsDir, { recursive: true });
 
-    expect(timeline.turns).toHaveLength(1);
-    expect(timeline.turns[0].assistantTurns).toHaveLength(1);
-    expect(timeline.turns[0].assistantTurns[0].tools).toHaveLength(1);
-    expect(timeline.turns[0].subagents).toEqual([
-      expect.objectContaining({ id: 'agent-1', name: 'reviewer' })
-    ]);
-    expect(timeline.summary.totalTools).toBe(1);
-    expect(timeline.summary.totalSubagents).toBe(1);
+    const events = [
+      { type: 'user.message', timestamp: '2026-02-20T10:00:00.000Z', data: { message: 'Hello' } },
+      { type: 'assistant.message', timestamp: '2026-02-20T10:00:01.000Z', data: { message: 'Hi' } },
+    ];
+    await fs.promises.writeFile(
+      path.join(transcriptsDir, 'test-session-id.jsonl'),
+      events.map(e => JSON.stringify(e)).join('\n')
+    );
+
+    const sessions = await adapter.scanEntries(tmpDir);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].id).toBe('test-session-id');
+    expect(sessions[0].source).toBe('vscode');
+    expect(sessions[0]._isTranscript).toBe(true);
+  });
+
+  it('findById locates transcript session', async () => {
+    const hash = 'def456';
+    const transcriptsDir = path.join(tmpDir, hash, 'GitHub.copilot-chat', 'transcripts');
+    await fs.promises.mkdir(transcriptsDir, { recursive: true });
+
+    const events = [
+      { type: 'user.message', timestamp: '2026-02-20T10:00:00.000Z', data: { message: 'Test' } },
+      { type: 'assistant.message', timestamp: '2026-02-20T10:00:01.000Z', data: { message: 'OK' } },
+    ];
+    await fs.promises.writeFile(
+      path.join(transcriptsDir, 'find-me.jsonl'),
+      events.map(e => JSON.stringify(e)).join('\n')
+    );
+
+    const session = await adapter.findById('find-me', tmpDir);
+    expect(session).not.toBeNull();
+    expect(session.id).toBe('find-me');
+    expect(session.source).toBe('vscode');
+  });
+
+  it('returns empty array when no transcript sessions exist', async () => {
+    const hash = 'empty123';
+    await fs.promises.mkdir(path.join(tmpDir, hash), { recursive: true });
+
+    const sessions = await adapter.scanEntries(tmpDir);
+    expect(sessions).toHaveLength(0);
   });
 });
-

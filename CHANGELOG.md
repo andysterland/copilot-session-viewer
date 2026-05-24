@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.9] - 2026-05-25
+
+### Added
+- **VS Code Transcript Reuse** - VS Code sessions now reuse the Copilot CLI parser pipeline for transcript-based sessions, unifying event extraction and UI rendering (#18).
+- **Agent Metadata Extraction** - Extract agent name, model, and user message from VS Code `chatSessions` metadata; display event timestamps in session detail.
+- **Subagent Model Display** - Show model name for subagents in event list and dropdown filter.
+- **Prompt Compliance Review** - Replace agent review with prompt compliance review on analysis page.
+- **Token Usage on Analysis Page** - Replace file operations card with token usage summary on the time analysis page.
+
+### Fixed
+- **VS Code Turn Numbering** - Correct turn numbering for pre-expanded VS Code transcripts.
+- **VS Code 0 Events** - Fix VS Code sessions showing 0 events on homepage cards.
+- **Subagent Event Synthesis** - Synthesize subagent events from `runSubagent` tool calls for both VS Code and Copilot CLI sources.
+- **WorkspaceStorage Path Display** - Don't show misleading workspaceStorage hash path on session cards.
+- **Import Fix** - Resolve import issues (#15).
+
+### Changed
+- **Remove Legacy chatSessions** - Drop legacy `chatSessions` support; only read transcript files.
+- **Remove Estimated Gantt** - Remove VS Code sequence-estimated Gantt chart; use Copilot CLI timeline instead.
+
 ## [0.3.8] - 2026-04-21
 
 ### Added

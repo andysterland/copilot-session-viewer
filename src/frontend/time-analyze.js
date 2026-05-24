@@ -22,6 +22,8 @@
  * </script>
  */
 
+const { getDisplayInputTokens, getCacheHitRatio: getUsageCacheHitRatio } = require('./usage-utils');
+
 const { createApp, ref, computed, onMounted, onUnmounted } = Vue;
 
 const app = createApp({
@@ -207,6 +209,12 @@ const app = createApp({
       if (m < 60) return m + 'm ' + remainder + 's';
       const h = Math.floor(m / 60);
       return h + 'h ' + (m % 60) + 'm';
+    };
+
+    const formatTokens = (num) => {
+      if (!num || num === 0) return '0';
+      if (num < 1000) return num.toString();
+      return Math.floor(num / 1000) + 'K';
     };
 
     const formatTime = (ts) => {
@@ -871,76 +879,44 @@ const app = createApp({
       return Math.max(...toolAnalysis.value.map(t => t.duration || 0), 1);
     });
 
-    // ── File operations ──
-    const fileOperations = computed(() => {
-      const fileTools = ['view', 'read', 'write', 'edit', 'create', 'glob', 'grep', 'notebookedit'];
-      // VSCode Copilot Chat tool name mappings
-      const vsCodeFileToolMap = {
-        'copilot_readfile': 'read',
-        'copilot_createfile': 'write',
-        'copilot_createdirectory': 'write',
-        'copilot_findfiles': 'search',
-        'copilot_findtextinfiles': 'search',
-        'copilot_listdirectory': 'read',
-        'textedit': 'edit',
-        'copilot_replacestring': 'edit',
-        'copilot_multireplacestring': 'edit',
-      };
-      const ops = [];
-
-      for (const ev of events.value) {
-        if (ev.type === 'tool.execution_start') {
-          const toolName = ev.data?.toolName?.toLowerCase() || '';
-          const args = ev.data?.arguments || {};
-          const path = args.path || args.file || args.directory || args.pattern || '';
-
-          // Check standard file tools
-          if (fileTools.includes(toolName)) {
-            if (path) {
-              let opType = 'other';
-              if (toolName === 'view' || toolName === 'read') opType = 'read';
-              else if (toolName === 'write' || toolName === 'notebookedit' || toolName === 'create') opType = 'write';
-              else if (toolName === 'edit') opType = 'edit';
-              else if (toolName === 'glob' || toolName === 'grep') opType = 'search';
-
-              ops.push({
-                toolName: ev.data?.toolName || toolName,
-                opType,
-                filePath: path,
-                timestamp: ev.timestamp,
-                startTime: ev.timestamp
-              });
-            }
-          }
-          // Check VSCode file tools
-          else if (vsCodeFileToolMap[toolName]) {
-            const opType = vsCodeFileToolMap[toolName];
-            ops.push({
-              toolName: ev.data?.toolName || toolName,
-              opType,
-              filePath: path || '(implicit)',
-              timestamp: ev.timestamp,
-              startTime: ev.timestamp
-            });
-          }
+    // ── Token Usage (from metadata.usage, same data as session detail sidebar) ──
+    const totalTokens = computed(() => {
+      if (!metadata.value.usage || !metadata.value.usage.modelMetrics) return 0;
+      let total = 0;
+      for (const model in metadata.value.usage.modelMetrics) {
+        const usage = metadata.value.usage.modelMetrics[model].usage;
+        if (usage) {
+          total += (usage.inputTokens || 0) + (usage.outputTokens || 0);
         }
       }
-
-      return ops.sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
+      return total;
     });
 
-    const fileStats = computed(() => {
-      const ops = fileOperations.value;
-      const uniqueFiles = new Set(ops.map(o => o.filePath));
-      return {
-        uniqueCount: uniqueFiles.size,
-        totalOps: ops.length,
-        reads: ops.filter(o => o.opType === 'read').length,
-        writes: ops.filter(o => o.opType === 'write').length,
-        edits: ops.filter(o => o.opType === 'edit').length,
-        searches: ops.filter(o => o.opType === 'search').length
-      };
+    const totalRequests = computed(() => {
+      if (!metadata.value.usage || !metadata.value.usage.modelMetrics) return 0;
+      let total = 0;
+      for (const model in metadata.value.usage.modelMetrics) {
+        total += (metadata.value.usage.modelMetrics[model].requests?.count || 0);
+      }
+      return total;
     });
+
+    const totalModels = computed(() => {
+      if (!metadata.value.usage || !metadata.value.usage.modelMetrics) return 0;
+      return Object.keys(metadata.value.usage.modelMetrics).length;
+    });
+
+    const getModelCacheHitRatio = (model) => {
+      const metrics = metadata.value.usage?.modelMetrics[model];
+      if (!metrics || !metrics.usage) return null;
+      return getUsageCacheHitRatio(metrics.usage);
+    };
+
+    const getDisplayUsageInputTokens = (model) => {
+      const metrics = metadata.value.usage?.modelMetrics[model];
+      if (!metrics || !metrics.usage) return 0;
+      return getDisplayInputTokens(metrics.usage);
+    };
 
     // ── Tool time by category ──
     const toolTimeByCategory = computed(() => {
@@ -1495,7 +1471,9 @@ const app = createApp({
       turnAnalysis, maxTurnDuration, groupedTurns,
       unifiedTimelineItems,
       toolAnalysis, sortedToolAnalysis, maxToolDuration,
-      fileOperations, fileStats,
+      fileOperations: [], fileStats: { totalOps: 0, reads: 0, edits: 0, writes: 0, searches: 0 },
+      totalTokens, totalRequests, totalModels,
+      getModelCacheHitRatio, getDisplayUsageInputTokens, formatTokens,
       toolTimeByCategory, maxCategoryTime,
       totalToolTime, totalToolCount, avgToolDuration, longestTool,
       successRate, errorCount, timeBreakdown,
@@ -1556,11 +1534,11 @@ const app = createApp({
             <span v-if="timeBreakdown.userThinkingTime > 1000"> · User {{ formatDuration(timeBreakdown.userThinkingTime) }} ({{ timeBreakdown.userThinkingPct }}%)</span>
           </div>
         </div>
-        <div class="summary-card" title="File system operations: reads (Read/Glob), edits (Edit), writes (Write), and searches (Grep).">
-          <div class="summary-card-label">File Operations</div>
-          <div class="summary-card-value">{{ fileStats.totalOps }}</div>
+        <div class="summary-card" title="Token usage across all models: input, output, and cached tokens.">
+          <div class="summary-card-label">Token Usage</div>
+          <div class="summary-card-value">{{ formatTokens(totalTokens) }}</div>
           <div class="summary-card-sub">
-            {{ fileStats.reads }} reads · {{ fileStats.edits }} edits · {{ fileStats.writes }} writes · {{ fileStats.searches }} searches
+            {{ totalRequests }} reqs · {{ totalModels }} model{{ totalModels === 1 ? '' : 's' }}
           </div>
         </div>
       </div>

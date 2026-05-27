@@ -44,7 +44,7 @@
           <span class="legend-dot" style="background: #f85149;" />
           <span>Tool Error (100%)</span>
         </div>
-        <template v-for="(cat, type) in EVENT_MARKER_CATEGORIES" :key="type">
+        <template v-for="(cat, type) in eventMarkerCategories" :key="type">
           <div v-if="type && !type.startsWith('tool.')" class="legend-item">
             <span class="legend-dot" :style="{ background: cat.color, borderRadius: cat.shape === 'circle' ? '50%' : cat.shape === 'diamond' ? '1px' : '2px', transform: cat.shape === 'diamond' ? 'rotate(45deg)' : 'none' }" />
             <span>{{ cat.label }}</span>
@@ -184,22 +184,22 @@
 import EventMarker from './EventMarker.vue';
 
 defineProps({
-  error: {},
+  error: { type: [String, Object, null], default: null },
   sessionId: { type: String, required: true },
   events: { type: Array, required: true },
   unifiedTimelineItems: { type: Array, required: true },
   showMarkerLegend: { type: Boolean, required: true },
   copyLabel: { type: String, required: true },
-  EVENT_MARKER_CATEGORIES: { type: Object, required: true },
-  ganttCrosshairX: {},
-  ganttCrosshairTime: { type: String },
+  eventMarkerCategories: { type: Object, required: true },
+  ganttCrosshairX: { type: Number, default: null },
+  ganttCrosshairTime: { type: String, default: '' },
   onGanttMouseMove: { type: Function, required: true },
   onGanttMouseLeave: { type: Function, required: true },
   ganttPosition: { type: Function, required: true },
   formatDuration: { type: Function, required: true },
   formatTime: { type: Function, required: true },
   toolTimeByCategory: { type: Array, required: true },
-  maxCategoryTime: { required: true },
+  maxCategoryTime: { type: Number, required: true },
 });
 
 defineEmits(['toggle-legend', 'copy-timeline']);

@@ -16,7 +16,8 @@
         @click="sidebarCollapsed = true"
       />
 
-      <SessionSidebar class="sidebar"
+      <SessionSidebar
+class="sidebar"
         :collapsed="sidebarCollapsed"
         :metadata="metadata"
         :format-date-time="formatDateTime"
@@ -62,7 +63,7 @@
           :subagent-dropdown-open="subagentDropdownOpen"
           :subagent-search-query="subagentSearchQuery"
           :subagent-token-usage="subagentTokenUsage"
-          :SUBAGENT_COLORS="SUBAGENT_COLORS"
+          :subagent-colors="SUBAGENT_COLORS"
           :current-filter="currentFilter"
           :type-filter-open="typeFilterOpen"
           :filters="filters"
@@ -139,7 +140,7 @@
                 :get-subagent-color="getSubagentColor"
                 :get-turn-number="getTurnNumber"
                 :get-turn-duration="getTurnDuration"
-                :SUBAGENT_COLORS="SUBAGENT_COLORS"
+                :subagent-colors="SUBAGENT_COLORS"
                 @select-subagent="selectSubagent"
               />
             </DynamicScrollerItem>

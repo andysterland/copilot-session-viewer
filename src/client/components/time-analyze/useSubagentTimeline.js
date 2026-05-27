@@ -1,7 +1,7 @@
 import { ref, computed } from 'vue';
 import { EVENT_MARKER_CATEGORIES, TRACKABLE_EVENT_TYPES } from './useTimelineCore.js';
 
-export function useSubagentTimeline(sortedEvents, sessionStart, sessionEnd, totalDuration) {
+export function useSubagentTimeline(sortedEvents, sessionStart, sessionEnd, _totalDuration) {
   const showMarkerLegend = ref(false);
 
   const subagentToolMap = computed(() => {

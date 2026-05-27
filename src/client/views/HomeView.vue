@@ -44,13 +44,19 @@ View
       <div v-if="currentSourceHintDir || currentCustomDirs.length > 0" class="mb-4 text-sm">
         <div v-if="currentSourceHintDir" class="flex items-center gap-2 text-text-faint text-sm mb-1">
           <span>📂 {{ currentSourceHintDir }}</span>
-          <button data-testid="add-dir-btn" class="text-accent cursor-pointer hover:text-link bg-transparent border-none p-0 text-sm" title="Add custom directory" @click="addCustomDirectory">＋</button>
-          <button data-testid="import-btn" class="text-accent cursor-pointer hover:text-link bg-transparent border-none p-0 text-sm" title="Import session from zip" :style="importLinkStyle" @click="triggerImport">📤</button>
+          <button data-testid="add-dir-btn" class="text-accent cursor-pointer hover:text-link bg-transparent border-none p-0 text-sm" title="Add custom directory" @click="addCustomDirectory">
+＋
+</button>
+          <button data-testid="import-btn" class="text-accent cursor-pointer hover:text-link bg-transparent border-none p-0 text-sm" title="Import session from zip" :style="importLinkStyle" @click="triggerImport">
+📤
+</button>
         </div>
         <div v-for="cd in currentCustomDirs" :key="cd.id" class="flex items-center gap-2 text-sm text-text-secondary mb-1">
-          <span class="inline-block w-2.5 h-2.5 rounded-full" :style="{ backgroundColor: cd.color }"></span>
+          <span class="inline-block w-2.5 h-2.5 rounded-full" :style="{ backgroundColor: cd.color }" />
           <span class="font-mono">{{ cd.path }}</span>
-          <button data-testid="remove-dir-btn" class="text-text-faint hover:text-error-text bg-transparent border-none cursor-pointer p-0 text-xs" @click="removeCustomDir(cd.id)">×</button>
+          <button data-testid="remove-dir-btn" class="text-text-faint hover:text-error-text bg-transparent border-none cursor-pointer p-0 text-xs" @click="removeCustomDir(cd.id)">
+×
+</button>
         </div>
       </div>
       <p v-if="currentSourceFilter" class="hint mt-5 text-text-secondary text-sm">
@@ -63,12 +69,14 @@ View
         style="display: none;"
         @change="handleFileChange"
       >
-      <div v-if="importStatusMsg" :class="[
+      <div
+v-if="importStatusMsg" :class="[
         'mb-3 py-2.5 px-3 rounded-md text-sm',
         importStatusType === 'success' ? 'bg-success-subtle border border-success-emphasis text-success' : '',
         importStatusType === 'error' ? 'bg-danger-subtle border border-danger-emphasis text-error-text' : '',
         importStatusType === 'loading' ? 'bg-accent-subtle border border-accent text-accent' : ''
-      ]">
+      ]"
+>
 {{ importStatusMsg }}
 </div>
       <div ref="sessionsContainer">

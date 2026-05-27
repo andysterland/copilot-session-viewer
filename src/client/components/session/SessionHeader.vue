@@ -20,9 +20,9 @@
 
 <script setup>
 defineProps({
-  sessionId: String,
-  source: String,
-  metadata: Object,
+  sessionId: { type: String, default: '' },
+  source: { type: String, default: '' },
+  metadata: { type: Object, default: () => ({}) },
   exporting: Boolean,
 });
 

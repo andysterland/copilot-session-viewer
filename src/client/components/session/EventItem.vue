@@ -48,9 +48,9 @@
         v-if="getSubagentInfo(item)"
         class="subagent-tag"
         :style="{ borderColor: getSubagentColor(item) || '#58a6ff', color: getSubagentColor(item) || '#58a6ff' }"
+        :title="'Filter to ' + getSubagentInfo(item).name"
         @mouseover="$event.target.style.background = (getSubagentColor(item) || '#58a6ff') + '26'"
         @mouseout="$event.target.style.background = ''"
-        :title="'Filter to ' + getSubagentInfo(item).name"
         @click.stop="$emit('selectSubagent', getSubagentInfo(item).toolCallId)"
       >🤖 {{ getSubagentInfo(item).name }}</span>
       <span class="event-timestamp text-xs text-text-secondary">{{ formatTime(item.timestamp) }}</span>
@@ -345,7 +345,7 @@ defineProps({
   getSubagentColor: { type: Function, required: true },
   getTurnNumber: { type: Function, required: true },
   getTurnDuration: { type: Function, required: true },
-  SUBAGENT_COLORS: { type: Array, required: true },
+  subagentColors: { type: Array, required: true },
 })
 
 defineEmits(['selectSubagent'])

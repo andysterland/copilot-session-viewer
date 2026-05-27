@@ -270,7 +270,7 @@ test.describe('Tagging Feature', () => {
       await input.fill('auto');
 
       // Debounce for autocomplete suggestions (no deterministic signal available)
-      await page.waitForTimeout(500); // eslint-disable-line playwright/no-wait-for-timeout
+      await page.waitForTimeout(500);
 
       // Autocomplete UI removed in Vue SPA - skip check
       const autocompleteVisible = false;

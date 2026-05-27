@@ -221,13 +221,13 @@ style="
 <script setup>
 defineProps({
   insightStatus: { type: String, required: true },
-  insightError: {},
-  insightLog: {},
+  insightError: { type: [String, Object, null], default: null },
+  insightLog: { type: String, default: '' },
   insightLoading: { type: Boolean },
-  insightAgeMs: { type: Number },
-  insightStartedAt: {},
-  insightGeneratedAt: {},
-  renderedInsight: { type: String },
+  insightAgeMs: { type: Number, default: 0 },
+  insightStartedAt: { type: [String, Number, null], default: null },
+  insightGeneratedAt: { type: [String, Number, null], default: null },
+  renderedInsight: { type: String, default: '' },
   formatDateTime: { type: Function, required: true },
 });
 

@@ -71,7 +71,7 @@
             :class="{ 'bg-accent-subtle': selectedSubagent === sa.toolCallId }"
             @click="$emit('selectSubagent', sa.toolCallId)"
           >
-            <div class="w-1 min-h-[20px] rounded-sm shrink-0 mt-0.5" :style="{ background: SUBAGENT_COLORS[sa.colorIndex % SUBAGENT_COLORS.length] }" />
+            <div class="w-1 min-h-[20px] rounded-sm shrink-0 mt-0.5" :style="{ background: subagentColors[sa.colorIndex % subagentColors.length] }" />
             <div class="flex-1 min-w-0">
               <div class="text-sm text-text-secondary font-medium whitespace-nowrap overflow-hidden text-ellipsis">
 {{ sa.name }}
@@ -159,24 +159,24 @@ import { ref } from 'vue';
 
 defineProps({
   sidebarCollapsed: Boolean,
-  searchText: String,
-  searchResultCount: String,
-  turns: Array,
-  userReqs: Array,
-  currentTurnIndex: Number,
-  subagentList: Array,
-  filteredSubagentList: Array,
-  selectedSubagent: [String, null],
+  searchText: { type: String, default: '' },
+  searchResultCount: { type: String, default: '' },
+  turns: { type: Array, default: () => [] },
+  userReqs: { type: Array, default: () => [] },
+  currentTurnIndex: { type: Number, default: -1 },
+  subagentList: { type: Array, default: () => [] },
+  filteredSubagentList: { type: Array, default: () => [] },
+  selectedSubagent: { type: [String, null], default: null },
   subagentDropdownOpen: Boolean,
-  subagentSearchQuery: String,
-  subagentTokenUsage: Object,
-  SUBAGENT_COLORS: Array,
-  currentFilter: String,
+  subagentSearchQuery: { type: String, default: '' },
+  subagentTokenUsage: { type: Object, default: () => ({}) },
+  subagentColors: { type: Array, default: () => [] },
+  currentFilter: { type: String, default: '' },
   typeFilterOpen: Boolean,
-  filters: Array,
-  activeFilterCount: Number,
-  formatDuration: Function,
-  truncateText: Function,
+  filters: { type: Array, default: () => [] },
+  activeFilterCount: { type: Number, default: 0 },
+  formatDuration: { type: Function, default: () => {} },
+  truncateText: { type: Function, default: () => {} },
 });
 
 defineEmits([

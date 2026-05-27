@@ -44,16 +44,20 @@
 
         <!-- Tabs -->
         <div data-testid="tabs" class="flex gap-1 mb-4 border-b border-border">
-          <button :class="[
+          <button
+:class="[
             'py-2 px-4 bg-none border-none border-b-2 border-transparent text-text-dim text-sm cursor-pointer transition-all duration-200 font-inherit hover:text-text-secondary',
             activeTab === 'timeline' ? '!text-accent !border-b-accent' : ''
-          ]" @click="activeTab = 'timeline'">
+          ]" @click="activeTab = 'timeline'"
+>
             📊 Timeline
           </button>
-          <button :class="[
+          <button
+:class="[
             'py-2 px-4 bg-none border-none border-b-2 border-transparent text-text-dim text-sm cursor-pointer transition-all duration-200 font-inherit hover:text-text-secondary',
             activeTab === 'insight' ? '!text-accent !border-b-accent' : ''
-          ]" @click="activeTab = 'insight'">
+          ]" @click="activeTab = 'insight'"
+>
             💡 Agent Review
           </button>
         </div>
@@ -67,7 +71,7 @@
           :unified-timeline-items="unifiedTimelineItems"
           :show-marker-legend="showMarkerLegend"
           :copy-label="copyLabel"
-          :EVENT_MARKER_CATEGORIES="EVENT_MARKER_CATEGORIES"
+          :event-marker-categories="EVENT_MARKER_CATEGORIES"
           :gantt-crosshair-x="ganttCrosshairX"
           :gantt-crosshair-time="ganttCrosshairTime"
           :on-gantt-mouse-move="onGanttMouseMove"

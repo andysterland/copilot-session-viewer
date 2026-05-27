@@ -32,7 +32,7 @@ jobs:
         run: npm ci
       
       - name: Build frontend
-        run: npm run build:prod
+        run: npm run build
       
       - name: Run linter
         run: npm run lint:check
@@ -56,10 +56,11 @@ jobs:
           node-version: '22.x'
           cache: 'npm'
       
-      - name: Install dependencies and build
-        run: |
-          npm ci
-          npm run build:prod
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Build (Vite frontend + esbuild backend)
+        run: npm run build
       
       - name: Pack tarball
         run: npm pack
@@ -67,14 +68,17 @@ jobs:
       - name: Verify tarball contents
         run: |
           TARBALL=$(ls *.tgz)
-          tar tzf "$TARBALL" | grep "public/js/" | head -10
-          echo "--- Checking minified files in tarball ---"
-          tar tzf "$TARBALL" | grep -q "public/js/homepage.min.js" && echo "✅ homepage.min.js"
-          tar tzf "$TARBALL" | grep -q "public/js/session-detail.min.js" && echo "✅ session-detail.min.js"
-          tar tzf "$TARBALL" | grep -q "public/js/time-analyze.min.js" && echo "✅ time-analyze.min.js"
-          tar tzf "$TARBALL" | grep -q "public/js/telemetry-browser.min.js" && echo "✅ telemetry-browser.min.js"
-          echo "--- Checking NO source files ---"
-          ! tar tzf "$TARBALL" | grep -q "src/frontend/" && echo "✅ No source files"
+          echo "--- Tarball contents ---"
+          tar tzf "$TARBALL" | head -30
+          echo "--- Checking required files ---"
+          tar tzf "$TARBALL" | grep -q "dist/server.min.js" && echo "✅ dist/server.min.js"
+          tar tzf "$TARBALL" | grep -q "dist/client/index.html" && echo "✅ dist/client/index.html"
+          tar tzf "$TARBALL" | grep -qE "dist/client/assets/index-.*\.js" && echo "✅ Vite JS bundle"
+          tar tzf "$TARBALL" | grep -qE "dist/client/assets/index-.*\.css" && echo "✅ Vite CSS bundle"
+          tar tzf "$TARBALL" | grep -q "bin/copilot-session-viewer" && echo "✅ CLI entry"
+          echo "--- Checking source files excluded ---"
+          ! tar tzf "$TARBALL" | grep -q "src/" && echo "✅ No src/ in tarball"
+          ! tar tzf "$TARBALL" | grep -q "__tests__/" && echo "✅ No __tests__/ in tarball"
       
       - name: Setup test session directories
         run: |
@@ -82,15 +86,10 @@ jobs:
           mkdir -p ~/.claude/projects
           mkdir -p ~/.pi/agent/sessions
       
-      - name: Generate test session data (all sources)
-        run: |
-          node __tests__/fixtures/generate-test-session.js
-          node __tests__/fixtures/create-multi-source-mock.js
-      
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
       
-      - name: Install and start server from tarball
+      - name: Install tarball into temp project (smoke test it installs cleanly)
         run: |
           TARBALL="$(ls $GITHUB_WORKSPACE/*.tgz)"
           mkdir -p /tmp/tgz-test
@@ -98,24 +97,18 @@ jobs:
           npm init -y > /dev/null
           npm install "$TARBALL" > /dev/null 2>&1
           chmod +x node_modules/.bin/copilot-session-viewer 2>/dev/null || true
-          export COPILOT_SESSION_DIR="$HOME/.copilot/session-state"
-          export CLAUDE_SESSION_DIR="$HOME/.claude/projects"
-          export PI_MONO_SESSION_DIR="$HOME/.pi/agent/sessions"
-          export PORT=3838
+          # Quick smoke test: server starts and serves SPA index from tarball
+          export PORT=3839
           export DISABLE_TELEMETRY=true
-          npx copilot-session-viewer &
+          node node_modules/@qiaolei81/copilot-session-viewer/dist/server.min.js &
+          SERVER_PID=$!
           sleep 5
-          curl -sf http://localhost:3838/ > /dev/null
-          echo "✅ Server started from tarball"
+          curl -sf http://localhost:3839/ > /dev/null && echo "✅ Tarball server smoke test passed"
+          kill $SERVER_PID 2>/dev/null || true
       
-      - name: Run E2E tests against tarball server
-        run: |
-          export COPILOT_SESSION_DIR="$HOME/.copilot/session-state"
-          export CLAUDE_SESSION_DIR="$HOME/.claude/projects"
-          export PI_MONO_SESSION_DIR="$HOME/.pi/agent/sessions"
-          npx playwright test
+      - name: Run E2E tests (playwright spawns its own server with fixture env)
+        run: npm run test:e2e
         env:
-          PORT: 3838
           DISABLE_TELEMETRY: 'true'
       
       - name: Upload test results

@@ -26,8 +26,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
       
-      - name: Build frontend
-        run: npm run build:prod
+      - name: Build (Vite frontend + esbuild backend)
+        run: npm run build
       
       - name: Run tests
         run: npm run test
@@ -43,17 +43,18 @@ jobs:
           cd /tmp/verify-tgz
           npm init -y
           npm install "$GITHUB_WORKSPACE/$TARBALL"
-          echo "--- Checking minified files ---"
-          test -f node_modules/@qiaolei81/copilot-session-viewer/public/js/homepage.min.js
-          test -f node_modules/@qiaolei81/copilot-session-viewer/public/js/session-detail.min.js
-          test -f node_modules/@qiaolei81/copilot-session-viewer/public/js/time-analyze.min.js
-          test -f node_modules/@qiaolei81/copilot-session-viewer/public/js/telemetry-browser.min.js
-          echo "--- Checking NO source files ---"
-          test ! -d node_modules/@qiaolei81/copilot-session-viewer/src/frontend
+          echo "--- Checking required files ---"
+          test -f node_modules/@qiaolei81/copilot-session-viewer/dist/server.min.js
+          test -f node_modules/@qiaolei81/copilot-session-viewer/dist/client/index.html
+          ls node_modules/@qiaolei81/copilot-session-viewer/dist/client/assets/index-*.js > /dev/null
+          ls node_modules/@qiaolei81/copilot-session-viewer/dist/client/assets/index-*.css > /dev/null
+          test -f node_modules/@qiaolei81/copilot-session-viewer/bin/copilot-session-viewer
+          echo "--- Checking source files excluded ---"
+          test ! -d node_modules/@qiaolei81/copilot-session-viewer/src
+          test ! -d node_modules/@qiaolei81/copilot-session-viewer/__tests__
           echo "--- Smoke test: server starts ---"
           export DISABLE_TELEMETRY=true
           export PORT=3839
-          mkdir -p ~/.copilot/session-state
           node node_modules/@qiaolei81/copilot-session-viewer/dist/server.min.js &
           sleep 3
           curl -sf http://localhost:3839/ > /dev/null

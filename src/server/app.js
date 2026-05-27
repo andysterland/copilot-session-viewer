@@ -1,10 +1,39 @@
 const express = require('express');
 const path = require('path');
+const fs = require('fs');
 const compression = require('compression');
 const helmet = require('helmet');
 
 // Configuration
 const config = require('./config');
+
+// Resolve dist/client location across both layouts:
+//   - source: src/server/app.js  →  ../../dist/client
+//   - bundled: dist/server.min.js (this file becomes part of the bundle, but the
+//     bundle's runtime __dirname is /dist) → ./client
+// Pick whichever exists.
+const DIST_CLIENT_DIR = (() => {
+  const candidates = [
+    path.join(__dirname, '../../dist/client'),
+    path.join(__dirname, 'client'),
+    path.join(__dirname, '../dist/client'),
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(path.join(p, 'index.html'))) return p;
+  }
+  // Fall back to the source-layout path; will 404 with a clear error if missing.
+  return candidates[0];
+})();
+const PUBLIC_DIR = (() => {
+  const candidates = [
+    path.join(__dirname, '../../public'),
+    path.join(__dirname, '../public'),
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  return candidates[0];
+})();
 
 // Middleware
 // Rate limiting disabled for local development
@@ -105,10 +134,10 @@ function createApp(options = {}) {
 
 
   // Static files (legacy public folder)
-  app.use('/public', express.static(path.join(__dirname, '../../public')));
+  app.use('/public', express.static(PUBLIC_DIR));
 
   // Serve Vue SPA static assets from dist/client
-  app.use(express.static(path.join(__dirname, '../../dist/client')));
+  app.use(express.static(DIST_CLIENT_DIR));
 
   // ── API routes ──
 
@@ -177,7 +206,7 @@ function createApp(options = {}) {
     if (req.path.startsWith('/api/') || req.path.startsWith('/public/')) {
       return next();
     }
-    res.sendFile(path.join(__dirname, '../../dist/client/index.html'));
+    res.sendFile(path.join(DIST_CLIENT_DIR, 'index.html'));
   });
 
   // Error handling

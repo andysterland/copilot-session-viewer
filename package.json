@@ -98,13 +98,8 @@
   },
   "files": [
     "bin/",
-    "dist/server.min.js",
-    "views/",
-    "public/css/",
-    "public/js/*.min.js",
-    "public/img/",
+    "dist/",
     "LICENSE",
-    "README.md",
-    "public/vendor/"
+    "README.md"
   ]
 }

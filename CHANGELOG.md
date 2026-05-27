@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-05-27
+
+### Added
+- **Vue 3 SPA frontend** - Migrated from server-rendered EJS templates + vanilla JS to a full Vue 3 SPA built with Vite, Pinia, and Vue Router (hash mode). HMR in development, optimized production bundle in `dist/client/` (#19).
+- **Custom directory support** - Users can register arbitrary session directories from the UI; UUID-based registration via `dirRegistryService` plumbs the custom dir through session detail / events / insights APIs. Replaces the prior insecure `?dir=` design.
+- **Unified event schema** - New Zod-based event schema and `eventNormalizer` so the frontend handles one event shape across all sources (Copilot CLI, Claude Code, Pi-Mono, VSCode, Modernize).
+- **OpenAPI spec** - `openapi.yaml` documents all REST endpoints; generated TypeScript schema types for the client.
+- **E2E test isolation** - `E2E_USE_FIXTURES=1` (default for `npm run test:e2e`) forces every source adapter to read from `__tests__/fixtures/sessions/`, never touching the developer's real session dirs. Synthetic CLI-generated fixtures replace messy real-world copies.
+
+### Changed
+- **Backend layout** - Reorganized `src/*.js` into `src/server/{controllers,services,adapters,middleware,models,schemas,utils}/`. Per-source adapters now extend `BaseSourceAdapter` with shared `recursiveScan` logic.
+- **Build pipeline** - Vite for client builds; `scripts/build.mjs` produces `dist/client/` + bundled `dist/server.min.js`.
+- **UI polish** - Custom-dir icons + color-coded session badges; simplified add-dir UX (+ icon, no SESSIONS header); larger dir info font; more visible system badge color.
+
+### Fixed
+- **CRITICAL: arbitrary file read** - Replaced raw `?dir=` query param (which allowed reading any path on disk) with UUID-registered custom directories (#19).
+- **3 rounds of code review fixes** - 1 CRITICAL + 13 MAJOR + minors across server and client: tighter path validation, dead code removal, timer cleanup, server-side input sanitization, Claude export path correction, telemetry connection string restored for release bundle.
+- **Flaky E2E tests** - Hash-router navigation racing with `waitForLoadState('networkidle')` caused intermittent failures in `npm run test:all`. Now waits on actual `/sessions` / `/events` API responses. Verified stable across 5 consecutive runs.
+- **71 `page.waitForTimeout(...)` calls** replaced with deterministic waits (`waitForResponse`, `waitForFunction`).
+- **Custom directory** - Reactivity on add/remove; `~` expansion in `?dir=` for session detail and events APIs; recursive scanning for CopilotAdapter; correct localStorage key + `data-testid` attrs for E2E.
+- **Lint cleanup** - 2 errors + 86 warnings → 0/0 (Vue prop types, attribute casing, formatting, unused vars).
+
+### Removed
+- **EJS templates** - `views/*.ejs` deleted; replaced by `src/client/` Vue components.
+- **Legacy `src/frontend/*.js`** - Vanilla JS frontend files (homepage.js, session-detail.js, time-analyze.js, telemetry-browser.js) deleted.
+- **Obsolete tests** - Removed test files for deleted vanilla-JS frontend (subagent-view, usage-utils, sessionController.render/homepage, routes, rateLimiting, agent-review/api/api-pagination/unified-format/xss-security e2e specs replaced or consolidated).
+- **Outdated design docs** - `docs/unified-event-format-{design,implementation}.md` removed (feature shipped, design docs no longer maintained).
+
 ## [0.3.9] - 2026-05-25
 
 ### Added

@@ -1,11 +1,11 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const SessionService = require('../src/services/sessionService');
-const SessionRepository = require('../src/services/sessionRepository');
+const SessionService = require('../src/server/services/sessionService');
+const SessionRepository = require('../src/server/services/sessionRepository');
 
 // Mock dependencies
-jest.mock('../src/services/sessionRepository');
+jest.mock('../src/server/services/sessionRepository');
 
 describe('SessionService - Additional Coverage', () => {
   let service;
@@ -142,7 +142,7 @@ describe('SessionService - Additional Coverage', () => {
       const result = await service.getSessionById('session-2');
 
       expect(result).toEqual({ id: 'session-2', summary: 'Second' });
-      expect(mockRepository.findById).toHaveBeenCalledWith('session-2');
+      expect(mockRepository.findById).toHaveBeenCalledWith('session-2', null);
       expect(mockRepository.findAll).not.toHaveBeenCalled();
     });
 
@@ -152,7 +152,7 @@ describe('SessionService - Additional Coverage', () => {
       const result = await service.getSessionById('nonexistent');
 
       expect(result).toBeUndefined();
-      expect(mockRepository.findById).toHaveBeenCalledWith('nonexistent');
+      expect(mockRepository.findById).toHaveBeenCalledWith('nonexistent', null);
     });
   });
 

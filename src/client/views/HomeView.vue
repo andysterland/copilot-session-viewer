@@ -198,9 +198,15 @@ const currentSourceHintDir = computed(() => {
 });
 
 async function addCustomDirectory() {
-  const dirInput = prompt('Enter absolute directory path (e.g. /home/user/sessions):');
-  if (!dirInput || (!dirInput.startsWith('/') && !dirInput.startsWith('~'))) {
-    if (dirInput) alert('Path must be absolute (start with / or ~)');
+  const dirInput = prompt('Enter absolute directory path (e.g. /home/user/sessions or C:\\Users\\user\\sessions):');
+  const isAbsolutePath = dirInput && (
+    dirInput.startsWith('/')
+    || dirInput.startsWith('~')
+    || /^[A-Za-z]:[\\/]/.test(dirInput)
+    || /^\\\\[^\\]+\\[^\\]+/.test(dirInput)
+  );
+  if (!isAbsolutePath) {
+    if (dirInput) alert('Path must be absolute (for example /home/user/sessions or C:\\Users\\user\\sessions)');
     return;
   }
   const source = currentSourceFilter.value;

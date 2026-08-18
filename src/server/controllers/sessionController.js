@@ -51,6 +51,7 @@ class SessionController {
 
   // API: Get sessions with optional pagination
   async getSessions(req, res) {
+    const startedAt = Date.now();
     try {
       // New route: source from path param; legacy: source from query
       const sourceParam = req.params.source || null;
@@ -67,6 +68,7 @@ class SessionController {
         const repo = this.sessionService.sessionRepository;
         const sessions = await repo.scanSource({ type: sourceFilter, dir: customDir });
         const sorted = sessions.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+        this._logSessionDiscovery(req, sourceFilter, sorted.length, startedAt, true);
         return res.json({
           sessions: sorted,
           hasMore: false,
@@ -93,6 +95,7 @@ class SessionController {
         });
 
         res.set({ 'Cache-Control': 'public, max-age=60' });
+        this._logSessionDiscovery(req, sourceFilter, paginationData.sessions.length, startedAt);
         res.json({
           sessions: paginationData.sessions,
           hasMore: paginationData.hasNextPage ?? (offset + limit < paginationData.totalSessions),
@@ -112,17 +115,20 @@ class SessionController {
         });
 
         res.set({ 'Cache-Control': 'public, max-age=60' });
+        this._logSessionDiscovery(req, sourceFilter, paginationData.sessions.length, startedAt);
         res.json(paginationData);
       } else if (sourceFilter && limit) {
         // Source-filtered first page (for pill switching)
         const sessions = await this.sessionService.getAllSessions(sourceFilter);
         const sliced = sessions.slice(0, limit);
         res.set({ 'Cache-Control': 'public, max-age=60' });
+        this._logSessionDiscovery(req, sourceFilter, sliced.length, startedAt);
         res.json({ sessions: sliced, hasMore: sessions.length > limit, totalSessions: sessions.length });
       } else {
         // Return all sessions for backward compatibility
         const sessions = await this.sessionService.getAllSessions(sourceFilter);
         res.set({ 'Cache-Control': 'public, max-age=300' });
+        this._logSessionDiscovery(req, sourceFilter, sessions.length, startedAt);
         res.json(sessions);
       }
     } catch (err) {
@@ -133,6 +139,7 @@ class SessionController {
 
   // API: Get session metadata
   async getSessionById(req, res) {
+    const startedAt = Date.now();
     try {
       const sessionId = this._getSessionId(req);
       if (!isValidSessionId(sessionId)) {
@@ -158,7 +165,12 @@ class SessionController {
       } catch (usageErr) {
         console.warn('Failed to extract usage data:', usageErr.message);
       }
-      trackEvent('SessionViewed', { sessionId, source: session.source || 'unknown' });
+      trackEvent('SessionViewed', { source: session.source || 'unknown' });
+      req.logger?.info?.('session.loaded', {
+        correlationId: req.correlationId,
+        source: session.source || 'unknown',
+        durationMs: Date.now() - startedAt
+      });
       res.json(session);
     } catch (err) {
       console.error('Error loading session:', err);
@@ -167,6 +179,7 @@ class SessionController {
   }
 
   async getSessionEvents(req, res) {
+    const startedAt = Date.now();
     try {
       const sessionId = this._getSessionId(req);
 
@@ -221,15 +234,37 @@ class SessionController {
             hasMore: offset + limit < result.total
           }
         });
-        trackEvent('SessionEventsLoaded', { sessionId, source: session.source || 'unknown', eventCount: result.total, paginated: true });
+        trackEvent('SessionEventsLoaded', { source: session.source || 'unknown', eventCount: result.total, paginated: true });
+        req.logger?.info?.('session.events-loaded', {
+          correlationId: req.correlationId,
+          source: session.source || 'unknown',
+          eventCount: result.total,
+          durationMs: Date.now() - startedAt
+        });
       } else {
         res.json(result);
-        trackEvent('SessionEventsLoaded', { sessionId, source: session.source || 'unknown', eventCount: Array.isArray(result) ? result.length : 0, paginated: false });
+        trackEvent('SessionEventsLoaded', { source: session.source || 'unknown', eventCount: Array.isArray(result) ? result.length : 0, paginated: false });
+        req.logger?.info?.('session.events-loaded', {
+          correlationId: req.correlationId,
+          source: session.source || 'unknown',
+          eventCount: Array.isArray(result) ? result.length : 0,
+          durationMs: Date.now() - startedAt
+        });
       }
     } catch (err) {
       console.error('Error loading events:', err);
       res.status(500).json({ error: 'Error loading events' });
     }
+  }
+
+  _logSessionDiscovery(req, source, sessionCount, startedAt, customDirectory = false) {
+    req.logger?.info?.('session.discovery-completed', {
+      correlationId: req.correlationId,
+      source: source || 'all',
+      sessionCount,
+      customDirectory,
+      durationMs: Date.now() - startedAt
+    });
   }
 
   // API: Get timeline data (source-agnostic)
@@ -257,7 +292,7 @@ class SessionController {
         'Vary': 'Accept-Encoding'
       });
 
-      trackEvent('TimelineViewed', { sessionId, source: session.source || 'unknown' });
+      trackEvent('TimelineViewed', { source: session.source || 'unknown' });
       res.json(timeline);
     } catch (err) {
       console.error('Error loading timeline:', err);
@@ -390,7 +425,7 @@ class SessionController {
       res.setHeader('Content-Type', 'application/zip');
       res.setHeader('Content-Disposition', `attachment; filename="session-${sessionId}.zip"`);
 
-      trackEvent('SessionExported', { sessionId });
+      trackEvent('SessionExported');
 
       res.send(zipBuffer);
     } catch (err) {

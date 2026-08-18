@@ -13,6 +13,9 @@ e2e/
 jest.config.js
 playwright.config.js
 .github/
+electron/
+electron-builder.yml
+release/
 
 # Dev files
 .eslintrc*

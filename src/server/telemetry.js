@@ -5,7 +5,9 @@
  * Must be required BEFORE any other modules (especially Express) in server.js.
  *
  * Features:
- * - Auto-collection of requests, dependencies, exceptions, and performance counters
+ * - Explicit collection of sanitized requests
+ * - Auto-collection of dependencies and performance counters
+ * - Category-only reporting for explicitly tracked exceptions
  * - Custom event and metric tracking
  * - Automatic disabling in test environments
  * - Support for manual disabling via DISABLE_TELEMETRY env var
@@ -16,6 +18,87 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const os = require('os');
+
+const SENSITIVE_PROPERTY = /(authorization|cookie|token|secret|password|prompt|content|events|sessionid|sessionidentifier|filepath|directory|executablepath|hostname|host)/i;
+const MACHINE_TAGS = [
+  'ai.cloud.roleInstance',
+  'ai.device.id',
+  'ai.device.machineName',
+  'ai.device.ip',
+  'ai.location.ip'
+];
+
+function sanitizeRoutePath(value) {
+  let pathname;
+  try {
+    pathname = new URL(String(value), 'http://localhost').pathname;
+  } catch {
+    pathname = String(value).split('?')[0] || '/';
+  }
+  return pathname.replace(/(\/sessions\/)[^/]+/gi, '$1{sessionId}');
+}
+
+function sanitizeRequestUrl(value) {
+  return `http://localhost${sanitizeRoutePath(value)}`;
+}
+
+function sanitizeRequestName(value) {
+  const match = /^([A-Z]+)\s+(.+)$/.exec(String(value || ''));
+  return match
+    ? `${match[1]} ${sanitizeRoutePath(match[2])}`
+    : sanitizeRoutePath(value);
+}
+
+function sanitizeTelemetryProperties(properties = {}) {
+  return Object.fromEntries(Object.entries(properties)
+    .filter(([key]) => !SENSITIVE_PROPERTY.test(key))
+    .map(([key, value]) => {
+      if (/url|path/i.test(key) && typeof value === 'string') {
+        return [key, sanitizeRoutePath(value)];
+      }
+      return [key, value];
+    }));
+}
+
+function createSafeException(error) {
+  const safeName = typeof error?.name === 'string'
+    && /^[A-Za-z][A-Za-z0-9]*Error$/.test(error.name)
+    ? error.name
+    : 'Error';
+  const safeError = new Error('Operational error');
+  safeError.name = safeName;
+  safeError.stack = undefined;
+  return safeError;
+}
+
+function sanitizeTelemetryEnvelope(envelope, appVersion, contextKeys = {}) {
+  envelope.tags = envelope.tags || {};
+  const machineTags = [
+    ...MACHINE_TAGS,
+    contextKeys.cloudRoleInstance,
+    contextKeys.deviceId,
+    contextKeys.deviceMachineName
+  ].filter(Boolean);
+  for (const tag of machineTags) delete envelope.tags[tag];
+  const operationNameTag = contextKeys.operationName || 'ai.operation.name';
+  if (typeof envelope.tags[operationNameTag] === 'string') {
+    envelope.tags[operationNameTag] = sanitizeRequestName(envelope.tags[operationNameTag]);
+  }
+
+  const baseData = envelope.data?.baseData;
+  if (!baseData) return true;
+  baseData.properties = {
+    ...sanitizeTelemetryProperties(baseData.properties),
+    appVersion
+  };
+  if (typeof baseData.url === 'string') {
+    baseData.url = sanitizeRequestUrl(baseData.url);
+  }
+  if (typeof baseData.name === 'string' && envelope.data.baseType === 'RequestData') {
+    baseData.name = sanitizeRequestName(baseData.name);
+  }
+  return true;
+}
 
 /**
  * Get or create a persistent anonymous user ID.
@@ -59,7 +142,8 @@ function getAppVersion() {
 // Determine if telemetry should be disabled
 const DEFAULT_CONNECTION_STRING = 'InstrumentationKey=39f4fbf1-d82f-42c3-b4ef-ea92a1fd82cb;IngestionEndpoint=https://eastus-8.in.applicationinsights.azure.com/;LiveEndpoint=https://eastus.livediagnostics.monitor.azure.com/;ApplicationId=7d4bb432-f2f5-4526-a5e6-31901e5a2db2';
 const connectionString = process.env.APPLICATIONINSIGHTS_CONNECTION_STRING || DEFAULT_CONNECTION_STRING;
-const isDisabled = process.env.DISABLE_TELEMETRY === 'true';
+const isDisabled = process.env.DISABLE_TELEMETRY === 'true'
+  || process.env.NODE_ENV === 'test';
 
 let client = null;
 
@@ -68,9 +152,9 @@ if (!isDisabled) {
     // Setup and start Application Insights
     appInsights.setup(connectionString)
       .setAutoDependencyCorrelation(true)
-      .setAutoCollectRequests(true)
+      .setAutoCollectRequests(false)
       .setAutoCollectPerformance(true, true)
-      .setAutoCollectExceptions(true)
+      .setAutoCollectExceptions(false)
       .setAutoCollectDependencies(true)
       .setAutoCollectConsole(false) // Disable console tracking to avoid noise
       .setUseDiskRetryCaching(true)
@@ -84,16 +168,14 @@ if (!isDisabled) {
     const appVersion = getAppVersion();
     const anonymousId = getAnonymousId();
     client.context.tags[client.context.keys.cloudRole] = 'copilot-session-viewer';
-    client.context.tags[client.context.keys.cloudRoleInstance] = os.hostname();
     client.context.tags[client.context.keys.applicationVersion] = appVersion;
     client.context.tags[client.context.keys.userId] = anonymousId;
 
-    // Add version to every event via telemetry initializer
-    client.addTelemetryProcessor((envelope) => {
-      envelope.data.baseData.properties = envelope.data.baseData.properties || {};
-      envelope.data.baseData.properties.appVersion = appVersion;
-      return true;
-    });
+    client.addTelemetryProcessor(envelope => sanitizeTelemetryEnvelope(
+      envelope,
+      appVersion,
+      client.context.keys
+    ));
 
     console.log('✅ Application Insights telemetry initialized');
   } catch (error) {
@@ -105,7 +187,7 @@ if (!isDisabled) {
   // Return no-op client when disabled
   client = createNoOpClient();
 
-    console.log('📊 Telemetry disabled (DISABLE_TELEMETRY=true)');
+  console.log('📊 Telemetry disabled');
 }
 
 /**
@@ -135,7 +217,7 @@ function trackEvent(name, properties = {}) {
   if (client && client.trackEvent) {
     client.trackEvent({
       name,
-      properties
+      properties: sanitizeTelemetryProperties(properties)
     });
   }
 }
@@ -151,7 +233,7 @@ function trackMetric(name, value, properties = {}) {
     client.trackMetric({
       name,
       value,
-      properties
+      properties: sanitizeTelemetryProperties(properties)
     });
   }
 }
@@ -164,8 +246,20 @@ function trackMetric(name, value, properties = {}) {
 function trackException(error, properties = {}) {
   if (client && client.trackException) {
     client.trackException({
-      exception: error,
-      properties
+      exception: createSafeException(error),
+      properties: sanitizeTelemetryProperties(properties)
+    });
+  }
+}
+
+function trackRequest(request) {
+  if (client && client.trackRequest) {
+    client.trackRequest({
+      ...request,
+      name: sanitizeRequestName(request.name),
+      url: sanitizeRequestUrl(request.url),
+      resultCode: String(request.resultCode),
+      properties: sanitizeTelemetryProperties(request.properties)
     });
   }
 }
@@ -189,9 +283,16 @@ function flush() {
 // Export the client and helper functions
 module.exports = {
   client,
+  createSafeException,
   trackEvent,
   trackMetric,
   trackException,
+  trackRequest,
   flush,
-  isEnabled: !isDisabled
+  isEnabled: !isDisabled,
+  sanitizeRequestName,
+  sanitizeRequestUrl,
+  sanitizeRoutePath,
+  sanitizeTelemetryEnvelope,
+  sanitizeTelemetryProperties
 };

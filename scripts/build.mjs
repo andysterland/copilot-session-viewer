@@ -15,16 +15,34 @@ const backendOptions = {
   target: ['node22'],
 };
 
+const workerOptions = {
+  entryPoints: ['src/server/workers/zipExtractorWorker.js'],
+  outfile: 'dist/zipExtractorWorker.js',
+  platform: 'node',
+  format: 'cjs',
+  bundle: true,
+  minify: isProd,
+  sourcemap: !isProd,
+  packages: 'external',
+  target: ['node22'],
+};
+
 async function build() {
   // Frontend is now built by Vite (npm run build:client)
 
   // Build backend bundle
   if (isWatch) {
-    const ctx = await esbuild.context(backendOptions);
-    await ctx.watch();
+    const contexts = await Promise.all([
+      esbuild.context(backendOptions),
+      esbuild.context(workerOptions)
+    ]);
+    await Promise.all(contexts.map(context => context.watch()));
     console.log('👀 Watching server.js...');
   } else {
-    await esbuild.build(backendOptions);
+    await Promise.all([
+      esbuild.build(backendOptions),
+      esbuild.build(workerOptions)
+    ]);
     console.log(`✅ Built ${backendOptions.outfile}`);
   }
 

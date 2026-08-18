@@ -18,7 +18,7 @@ function _serializeWrite(fn) {
  */
 class TagService {
   constructor() {
-    this.knownTagsDir = path.join(os.homedir(), '.session-viewer');
+    this.knownTagsDir = process.env.KNOWN_TAGS_DIR || path.join(os.homedir(), '.session-viewer');
     this.knownTagsFilePath = path.join(this.knownTagsDir, 'known-tags.json');
   }
 

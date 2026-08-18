@@ -11,7 +11,7 @@ permissions:
   pull-requests: read
 
 jobs:
-  test:
+  web-unit:
     runs-on: ubuntu-latest
     
     strategy:
@@ -42,9 +42,9 @@ jobs:
         env:
           DISABLE_TELEMETRY: 'true'
 
-  e2e:
+  web-e2e-and-package:
     runs-on: ubuntu-latest
-    needs: test
+    needs: web-unit
     
     steps:
       - name: Checkout code
@@ -67,18 +67,38 @@ jobs:
       
       - name: Verify tarball contents
         run: |
-          TARBALL=$(ls *.tgz)
+          set -euo pipefail
+          TARBALL="$(find . -maxdepth 1 -name '*.tgz' -print -quit)"
+          test -n "$TARBALL"
+          CONTENTS="$(tar tzf "$TARBALL")"
+          require_file() {
+            grep -qE "$1" <<<"$CONTENTS" || {
+              echo "::error::Missing required tarball entry matching $1"
+              exit 1
+            }
+            echo "✅ $2"
+          }
+          forbid_file() {
+            if grep -qE "$1" <<<"$CONTENTS"; then
+              echo "::error::Unexpected tarball entry matching $1"
+              exit 1
+            fi
+            echo "✅ $2"
+          }
           echo "--- Tarball contents ---"
-          tar tzf "$TARBALL" | head -30
+          sed -n '1,30p' <<<"$CONTENTS"
           echo "--- Checking required files ---"
-          tar tzf "$TARBALL" | grep -q "dist/server.min.js" && echo "✅ dist/server.min.js"
-          tar tzf "$TARBALL" | grep -q "dist/client/index.html" && echo "✅ dist/client/index.html"
-          tar tzf "$TARBALL" | grep -qE "dist/client/assets/index-.*\.js" && echo "✅ Vite JS bundle"
-          tar tzf "$TARBALL" | grep -qE "dist/client/assets/index-.*\.css" && echo "✅ Vite CSS bundle"
-          tar tzf "$TARBALL" | grep -q "bin/copilot-session-viewer" && echo "✅ CLI entry"
+          require_file '^package/dist/server\.min\.js$' 'dist/server.min.js'
+          require_file '^package/dist/zipExtractorWorker\.js$' 'dist/zipExtractorWorker.js'
+          require_file '^package/dist/client/index\.html$' 'dist/client/index.html'
+          require_file '^package/dist/client/assets/index-.*\.js$' 'Vite JS bundle'
+          require_file '^package/dist/client/assets/index-.*\.css$' 'Vite CSS bundle'
+          require_file '^package/bin/copilot-session-viewer$' 'CLI entry'
           echo "--- Checking source files excluded ---"
-          ! tar tzf "$TARBALL" | grep -q "src/" && echo "✅ No src/ in tarball"
-          ! tar tzf "$TARBALL" | grep -q "__tests__/" && echo "✅ No __tests__/ in tarball"
+          forbid_file '^package/src/' 'No src/ in tarball'
+          forbid_file '^package/__tests__/' 'No __tests__/ in tarball'
+          forbid_file '^package/electron/' 'No Electron host in npm tarball'
+          forbid_file '^package/electron-builder\.yml$' 'No desktop packaging config in npm tarball'
       
       - name: Setup test session directories
         run: |
@@ -118,3 +138,74 @@ jobs:
           name: test-results
           path: test-results/
           retention-days: 7
+
+  electron-unit:
+    name: Electron unit and security tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          cache: npm
+      - run: npm ci
+      - run: npm run test:electron
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+  electron-e2e:
+    name: Electron Playwright smoke
+    runs-on: ubuntu-latest
+    needs: electron-unit
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: xvfb-run --auto-servernum npm run test:electron:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: electron-e2e-results
+          path: test-results/
+          retention-days: 14
+
+  electron-package:
+    name: Electron package (${{ matrix.os }})
+    needs: [web-unit, electron-unit]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            command: electron:dist:win
+            artifact: windows
+          - os: macos-latest
+            command: electron:dist:mac
+            artifact: macos
+          - os: ubuntu-latest
+            command: electron:dist:linux
+            artifact: linux
+    runs-on: ${{ matrix.os }}
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          cache: npm
+      - run: npm ci
+      - run: npm run ${{ matrix.command }}
+      - run: npm run electron:checksums
+      - uses: actions/upload-artifact@v4
+        with:
+          name: electron-unsigned-${{ matrix.artifact }}
+          path: |
+            release/electron/*
+            !release/electron/*-unpacked
+            electron/generated/*
+          retention-days: 14

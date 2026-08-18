@@ -124,6 +124,8 @@ import SummaryTooltip from '../components/home/SummaryTooltip.vue';
 import BottomSheet from '../components/home/BottomSheet.vue';
 import { toUrlSource } from '../utils/sourceMapping.js';
 import { listDirs, registerDir, removeDir } from '../api/dirs.js';
+import { selectSessionDirectory } from '../utils/desktopBridge.js';
+import { showErrorDialog } from '../components/desktop/dialogService.js';
 
 const router = useRouter();
 const sessionInput = ref('');
@@ -198,9 +200,30 @@ const currentSourceHintDir = computed(() => {
 });
 
 async function addCustomDirectory() {
-  const dirInput = prompt('Enter absolute directory path (e.g. /home/user/sessions):');
-  if (!dirInput || (!dirInput.startsWith('/') && !dirInput.startsWith('~'))) {
-    if (dirInput) alert('Path must be absolute (start with / or ~)');
+  let dirInput;
+  try {
+    dirInput = await selectSessionDirectory();
+  } catch (err) {
+    await showErrorDialog({
+      title: 'Directory picker unavailable',
+      message: 'Could not open the directory picker.',
+      detail: err.message
+    });
+    return;
+  }
+  const isAbsolute = dirInput && (
+    dirInput.startsWith('/')
+    || dirInput.startsWith('~')
+    || /^[a-zA-Z]:[\\/]/.test(dirInput)
+    || dirInput.startsWith('\\\\')
+  );
+  if (!dirInput || !isAbsolute) {
+    if (dirInput) {
+      await showErrorDialog({
+        title: 'Invalid directory path',
+        message: 'Path must be absolute.'
+      });
+    }
     return;
   }
   const source = currentSourceFilter.value;
@@ -212,7 +235,11 @@ async function addCustomDirectory() {
   try {
     entry = await registerDir(dirInput);
   } catch (err) {
-    alert(`Could not add directory: ${err.message}`);
+    await showErrorDialog({
+      title: 'Directory could not be added',
+      message: 'Could not add the selected directory.',
+      detail: err.message
+    });
     return;
   }
   const colorIdx = list.filter(e => e.source === source).length % DIR_COLORS.length;
@@ -510,6 +537,7 @@ onMounted(async () => {
   document.addEventListener('touchmove', onTouchMove, { passive: true });
   document.addEventListener('touchend', onTouchEnd, { passive: true });
   document.addEventListener('touchcancel', onTouchEnd, { passive: true });
+  window.addEventListener('desktop:add-directory', addCustomDirectory);
 
   // Fetch source hints
   try {
@@ -558,5 +586,6 @@ onUnmounted(() => {
   document.removeEventListener('touchmove', onTouchMove);
   document.removeEventListener('touchend', onTouchEnd);
   document.removeEventListener('touchcancel', onTouchEnd);
+  window.removeEventListener('desktop:add-directory', addCustomDirectory);
 });
 </script>

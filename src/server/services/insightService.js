@@ -10,10 +10,12 @@ const os = require('os');
 const { spawn } = require('child_process');
 const config = require('../config');
 const processManager = require('../utils/processManager');
+const { ExecutableResolver } = require('./executableResolver');
 
 class InsightService {
-  constructor() {
-    // No longer needs session directories - paths are passed directly
+  constructor(options = {}) {
+    this.executableResolver = options.executableResolver || new ExecutableResolver();
+    this.logger = options.logger || null;
   }
 
   /**
@@ -24,24 +26,28 @@ class InsightService {
     const configs = {
       copilot: {
         name: 'Copilot',
+        executable: 'copilot',
         cli: 'copilot',
         args: (tmpDir, prompt) => ['--config-dir', tmpDir, '--yolo', '-p', prompt],
         cwd: sessionPath
       },
       vscode: {
         name: 'Copilot',
+        executable: 'copilot',
         cli: 'copilot',
         args: (tmpDir, prompt) => ['--config-dir', tmpDir, '--yolo', '-p', prompt],
         cwd: sessionPath
       },
       claude: {
         name: 'Claude Code',
+        executable: 'claude',
         cli: 'claude',
         args: (_tmpDir, prompt) => ['-p', prompt, '--allowedTools', 'Read', '--max-turns', '10'],
         cwd: sessionPath
       },
       'pi-mono': {
         name: 'Pi',
+        executable: 'pi',
         cli: 'pi',
         args: (_tmpDir, prompt) => ['-p', prompt],
         cwd: sessionPath
@@ -59,7 +65,7 @@ class InsightService {
    * @param {boolean} forceRegenerate - Force new generation
    * @returns {Promise<Object>} Insight status and report
    */
-  async generateInsight(sessionId, sessionPath, source = 'copilot', forceRegenerate = false) {
+  async generateInsight(sessionId, sessionPath, source = 'copilot', forceRegenerate = false, context = {}) {
     // Use per-session insight file to avoid collisions in shared directories
     const insightFile = path.join(sessionPath, `${sessionId}.agent-review.md`);
     const lockFile = path.join(sessionPath, `${sessionId}.agent-review.md.lock`);
@@ -181,7 +187,12 @@ class InsightService {
     }
 
     // Start generation
-    await this._spawnAnalysisProcess(sessionPath, eventsFile, insightFile, lockFile, toolConfig);
+    try {
+      await this._spawnAnalysisProcess(sessionPath, eventsFile, insightFile, lockFile, toolConfig, context);
+    } catch (err) {
+      await fs.unlink(lockFile).catch(() => {});
+      throw err;
+    }
 
     return {
       status: 'generating',
@@ -194,8 +205,14 @@ class InsightService {
    * Spawn analysis process safely (no shell)
    * @private
    */
-  async _spawnAnalysisProcess(sessionPath, eventsFile, insightFile, lockFile, toolConfig) {
+  async _spawnAnalysisProcess(sessionPath, eventsFile, insightFile, lockFile, toolConfig, context = {}) {
     const sessionId = path.basename(sessionPath); // Extract session ID from path
+    const invocation = this.executableResolver.resolveInvocation
+      ? await this.executableResolver.resolveInvocation(toolConfig.executable)
+      : {
+        command: await this.executableResolver.resolve(toolConfig.executable),
+        args: []
+      };
     const tmpDir = path.join(os.tmpdir(), `agent-review-${sessionId}-${Date.now()}`);
     await fs.mkdir(tmpDir, { recursive: true});
 
@@ -203,21 +220,33 @@ class InsightService {
     const outputFile = path.join(sessionPath, `${sessionId}.agent-review.md.tmp`);
 
     // Spawn analysis tool directly (no shell)
-    const cliPath = toolConfig.cli;
     const args = toolConfig.args(tmpDir, prompt);
+    const processStartedAt = Date.now();
     
-    console.log(`🤖 Starting ${toolConfig.name} analysis: ${cliPath} ${args.slice(0, 2).join(' ')}...`);
-    console.log(`📋 Args count: ${args.length}, prompt length: ${prompt.length} chars`);
+    console.log(`🤖 Starting ${toolConfig.name} analysis: ${path.basename(invocation.command)}`);
+    this.logger?.info?.('child-process.started', {
+      component: 'insight',
+      correlationId: context.correlationId,
+      executable: path.basename(invocation.command),
+      source: toolConfig.executable
+    });
     
     // Use system PATH - CLI should be in the user's PATH
-    const analysisProcess = spawn(cliPath, args, {
+    const useProcessGroup = process.platform !== 'win32';
+    const analysisProcess = spawn(invocation.command, [...invocation.args, ...args], {
       env: { ...process.env },
       cwd: sessionPath,
-      stdio: ['pipe', 'pipe', 'pipe']
+      detached: useProcessGroup,
+      shell: false,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true
     });
 
     // Register for cleanup
-    processManager.register(analysisProcess, { name: `insight-${sessionId}` });
+    processManager.register(analysisProcess, {
+      name: `insight-${sessionId}`,
+      processGroup: useProcessGroup
+    });
 
     // Always attach an 'error' handler to stdin to avoid unhandled EPIPE crashes.
     analysisProcess.stdin.on('error', (err) => {
@@ -266,9 +295,13 @@ class InsightService {
 
         const stderr = Buffer.concat(stderrChunks).toString('utf-8').slice(0, MAX_STDERR);
         console.log(`📋 ${toolConfig.name} process exited with code ${code}`);
-        if (stderr) {
-          console.log(`📋 ${toolConfig.name} stderr:`, stderr.substring(0, 500));
-        }
+        this.logger?.info?.('child-process.completed', {
+          component: 'insight',
+          correlationId: context.correlationId,
+          executable: path.basename(invocation.command),
+          exitCode: code,
+          durationMs: Date.now() - processStartedAt
+        });
 
         if (code !== 0) {
           console.error(`❌ ${toolConfig.name} CLI failed (code ${code}):`, stderr);
@@ -311,6 +344,23 @@ class InsightService {
 
     analysisProcess.on('error', async (err) => {
       console.error(`❌ Failed to spawn ${toolConfig.name}:`, err);
+      this.logger?.error?.('child-process.failed', {
+        component: 'insight',
+        correlationId: context.correlationId,
+        executable: path.basename(invocation.command),
+        durationMs: Date.now() - processStartedAt,
+        error: err
+      });
+      await fs.writeFile(
+        insightFile,
+        `# Generation Failed\n\n${toolConfig.name} could not be started. Configure its executable in Desktop Settings or PATH.\n`,
+        'utf8'
+      ).catch(writeError => {
+        this.logger?.error?.('insight.failure-report-write-failed', {
+          correlationId: context.correlationId,
+          error: writeError
+        });
+      });
       await fs.unlink(lockFile).catch(() => {});
       await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     });

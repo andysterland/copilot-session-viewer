@@ -1,0 +1,91 @@
+appId: com.github.andysterland.copilot-session-viewer
+productName: Copilot Session Viewer
+executableName: copilot-session-viewer
+artifactName: copilot-session-viewer-${version}-${os}-${arch}.${ext}
+copyright: Copyright © 2026 Copilot Session Viewer contributors
+
+directories:
+  output: release/electron
+  buildResources: electron/assets
+
+extraMetadata:
+  name: copilot-session-viewer
+  main: electron/main.js
+
+files:
+  - electron/**/*
+  - dist/client/**/*
+  - src/server/**/*
+  - lib/**/*
+  - public/**/*
+  - package.json
+  - LICENSE
+  - '!electron/generated/**/*'
+  - '!electron/scripts/**/*'
+
+extraResources:
+  - from: electron/generated
+    to: compliance
+    filter:
+      - '**/*'
+
+asar: true
+npmRebuild: false
+afterPack: electron/afterPack.js
+
+publish:
+  provider: github
+  owner: andysterland
+  repo: copilot-session-viewer
+  releaseType: draft
+
+win:
+  icon: electron/assets/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+  requestedExecutionLevel: asInvoker
+  verifyUpdateCodeSignature: true
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  deleteAppDataOnUninstall: false
+
+mac:
+  icon: electron/assets/icon.png
+  category: public.app-category.developer-tools
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+    - target: zip
+      arch:
+        - x64
+        - arm64
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  notarize: true
+  entitlements: electron/assets/entitlements.mac.plist
+  entitlementsInherit: electron/assets/entitlements.mac.plist
+
+dmg:
+  sign: false
+
+linux:
+  icon: electron/assets/icon.png
+  category: Development
+  synopsis: View and analyze local AI coding-agent sessions
+  description: Secure desktop host for Copilot Session Viewer
+  target:
+    - target: AppImage
+      arch:
+        - x64
+
+appImage:
+  artifactName: copilot-session-viewer-${version}-linux-${arch}.${ext}

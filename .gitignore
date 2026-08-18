@@ -22,6 +22,7 @@ final-test.js
 # Temporary screenshots
 *.png
 !docs/images/*.png
+!electron/assets/icon.png
 
 # Temporary documentation
 DIVIDER-*.md
@@ -60,3 +61,8 @@ TODO*.md
 dist/
 public/js/
 *.tgz
+
+# Electron build outputs and generated compliance reports
+release/electron/
+electron/generated/
+__tests__/.artifacts/

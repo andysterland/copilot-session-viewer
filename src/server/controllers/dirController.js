@@ -26,6 +26,9 @@ class DirController {
 
     try {
       const entry = await this.dirRegistryService.register(rawPath, label);
+      req.logger?.info?.('directory.registered', {
+        correlationId: req.correlationId
+      });
       return res.status(201).json(entry);
     } catch (err) {
       return res.status(400).json({ error: err.message });

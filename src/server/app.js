@@ -7,38 +7,45 @@ const helmet = require('helmet');
 // Configuration
 const config = require('./config');
 
-// Resolve dist/client location across both layouts:
-//   - source: src/server/app.js  →  ../../dist/client
-//   - bundled: dist/server.min.js (this file becomes part of the bundle, but the
-//     bundle's runtime __dirname is /dist) → ./client
-// Pick whichever exists.
-const DIST_CLIENT_DIR = (() => {
+function resolveDirectory(explicitPath, candidates, requiredFile) {
+  if (explicitPath) {
+    const resolved = path.resolve(explicitPath);
+    if (!fs.existsSync(path.join(resolved, requiredFile))) {
+      throw new Error(`Required application asset is missing: ${path.join(resolved, requiredFile)}`);
+    }
+    return resolved;
+  }
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(path.join(candidate, requiredFile))) return candidate;
+  }
+  return candidates[0];
+}
+
+function resolveClientDirectory(explicitPath) {
   const candidates = [
     path.join(__dirname, '../../dist/client'),
     path.join(__dirname, 'client'),
     path.join(__dirname, '../dist/client'),
   ];
-  for (const p of candidates) {
-    if (fs.existsSync(path.join(p, 'index.html'))) return p;
-  }
-  // Fall back to the source-layout path; will 404 with a clear error if missing.
-  return candidates[0];
-})();
-const PUBLIC_DIR = (() => {
+  return resolveDirectory(explicitPath, candidates, 'index.html');
+}
+
+function resolvePublicDirectory(explicitPath) {
   const candidates = [
     path.join(__dirname, '../../public'),
     path.join(__dirname, '../public'),
   ];
-  for (const p of candidates) {
-    if (fs.existsSync(p)) return p;
-  }
-  return candidates[0];
-})();
+  if (explicitPath) return path.resolve(explicitPath);
+  return candidates.find(candidate => fs.existsSync(candidate)) || candidates[0];
+}
 
 // Middleware
 // Rate limiting disabled for local development
 
 const { requestTimeout, developmentCors, errorHandler, notFoundHandler, telemetryLocals } = require('./middleware/common');
+const { requestContext } = require('./middleware/requestContext');
+const { createDesktopSecurityMiddleware } = require('./middleware/desktopSecurity');
 
 // Source mapping
 const { isValidSource, getAllSources } = require('./utils/sourceMapping');
@@ -72,6 +79,8 @@ function validateDirId(req, res, next) {
 
 function createApp(options = {}) {
   const app = express();
+  const clientDirectory = resolveClientDirectory(options.clientDirectory);
+  const publicDirectory = resolvePublicDirectory(options.publicDirectory);
 
   // Disable Express's automatic ETag generation (prevents 304 on live/active session files)
   app.set('etag', false);
@@ -122,8 +131,18 @@ function createApp(options = {}) {
   }));
   app.use(express.json({ limit: '1mb' }));
   app.use(express.urlencoded({ extended: true }));
+  app.use(requestContext({
+    logger: options.logger,
+    includeErrorId: Boolean(options.desktopSecurity)
+  }));
   app.use(requestTimeout);
   app.use(telemetryLocals);
+
+  if (options.desktopSecurity) {
+    const desktopSecurity = createDesktopSecurityMiddleware(options.desktopSecurity);
+    app.get('/desktop-auth', desktopSecurity.exchangeStartupToken);
+    app.use(desktopSecurity.protectApi);
+  }
 
   // CORS in development
   if (config.NODE_ENV === 'development') {
@@ -134,10 +153,10 @@ function createApp(options = {}) {
 
 
   // Static files (legacy public folder)
-  app.use('/public', express.static(PUBLIC_DIR));
+  app.use('/public', express.static(publicDirectory));
 
   // Serve Vue SPA static assets from dist/client
-  app.use(express.static(DIST_CLIENT_DIR));
+  app.use(express.static(clientDirectory));
 
   // ── API routes ──
 
@@ -206,7 +225,7 @@ function createApp(options = {}) {
     if (req.path.startsWith('/api/') || req.path.startsWith('/public/')) {
       return next();
     }
-    res.sendFile(path.join(DIST_CLIENT_DIR, 'index.html'));
+    res.sendFile(path.join(clientDirectory, 'index.html'));
   });
 
   // Error handling

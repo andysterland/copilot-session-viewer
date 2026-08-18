@@ -4,6 +4,7 @@ require('./src/server/telemetry');
 const createApp = require('./src/server/app');
 const config = require('./src/server/config');
 const processManager = require('./src/server/utils/processManager');
+const { startServer } = require('./src/server/lifecycle');
 
 // Create the Express app
 const app = createApp();
@@ -13,17 +14,24 @@ module.exports = app;
 
 // Start server only if not being required by tests
 if (require.main === module) {
-  const server = app.listen(config.PORT, () => {
-    console.log(`🚀 Copilot Session Viewer running at http://localhost:${config.PORT}`);
+  let serverHandle;
+  startServer({ app, port: config.PORT }).then((handle) => {
+    serverHandle = handle;
+    console.log(`🚀 Copilot Session Viewer running at http://localhost:${handle.port}`);
     console.log(`🔧 Environment: ${config.NODE_ENV}`);
     console.log(`⚡ Active processes: ${processManager.getActiveCount()}`);
+  }).catch((error) => {
+    console.error('❌ Failed to start Copilot Session Viewer:', error);
+    process.exitCode = 1;
   });
 
   // Graceful shutdown
   process.on('SIGTERM', () => {
     console.log('📛 SIGTERM received, closing server...');
-    server.close(() => {
+    serverHandle?.close().then(() => {
       console.log('✅ Server closed');
+    }).catch((error) => {
+      console.error('❌ Failed to close server:', error);
     });
   });
 }

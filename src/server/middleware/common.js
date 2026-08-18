@@ -29,13 +29,19 @@ const developmentCors = (req, res, next) => {
 // Error handling middleware
 const errorHandler = (err, req, res, _next) => {
   console.error('Unhandled error:', err.stack);
+  req.logger?.error?.('http.request.failed', {
+    correlationId: req.correlationId,
+    method: req.method,
+    path: req.path,
+    statusCode: err.status || 500,
+    error: err
+  });
 
   // Track exception in Application Insights
   trackException(err, {
-    url: req.url,
+    path: req.path,
     method: req.method,
-    statusCode: (err.status || 500).toString(),
-    userAgent: (req.headers && req.headers['user-agent']) || 'unknown'
+    statusCode: (err.status || 500).toString()
   });
 
   const statusCode = err.status || 500;
@@ -45,13 +51,14 @@ const errorHandler = (err, req, res, _next) => {
 
   res.status(statusCode).json({
     error: message,
+    correlationId: req.correlationId,
     ...(isDevelopment && { stack: err.stack })
   });
 };
 
 // 404 handler
 const notFoundHandler = (req, res) => {
-  res.status(404).json({ error: 'Not found' });
+  res.status(404).json({ error: 'Not found', correlationId: req.correlationId });
 };
 
 module.exports = {

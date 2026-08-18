@@ -1,16 +1,16 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const crypto = require('crypto');
 const multer = require('multer');
-const { spawn } = require('child_process');
 const { isValidSessionId } = require('../utils/helpers');
 const { trackEvent, trackException } = require('../telemetry');
-const processManager = require('../utils/processManager');
 const config = require('../config');
 const { registry } = require('../adapters');
+const { ZipExtractionService } = require('../services/zipExtractionService');
 
 class UploadController {
-  constructor() {
+  constructor(options = {}) {
     this.SESSION_DIR = process.env.SESSION_DIR || path.join(os.homedir(), '.copilot', 'session-state');
     this.uploadDir = process.env.UPLOAD_DIR || path.join(os.tmpdir(), 'copilot-session-uploads');
 
@@ -20,6 +20,7 @@ class UploadController {
       claude: path.join(os.homedir(), '.claude', 'projects'),
       'pi-mono': path.join(os.homedir(), '.pi', 'agent', 'sessions')
     };
+    this.zipExtractionService = options.zipExtractionService || new ZipExtractionService();
 
     // Don't create uploadDir here - multer's DiskStorage will handle it
     // This avoids EEXIST errors when multiple tests run in parallel
@@ -53,66 +54,47 @@ class UploadController {
       }
 
       const zipPath = req.file.path;
-      extractDir = path.join(this.uploadDir, `extract-${Date.now()}`);
+      extractDir = path.join(this.uploadDir, `extract-${crypto.randomUUID()}`);
       const uploadedFileSize = (await fs.promises.stat(zipPath)).size;
+      req.logger?.info?.('import.started', {
+        correlationId: req.correlationId,
+        compressedBytes: uploadedFileSize
+      });
 
       await fs.promises.mkdir(extractDir, { recursive: true });
-      await this._validateZipArchive(zipPath);
+      await this._extractZipArchive(zipPath, extractDir);
+      await fs.promises.unlink(zipPath).catch(() => {});
 
-      const unzipProcess = spawn('unzip', ['-q', zipPath, '-d', extractDir]);
-      processManager.register(unzipProcess, { name: 'unzip-import' });
+      const result = await this._importExtractedSession(extractDir, req);
+      await fs.promises.rm(extractDir, { recursive: true, force: true }).catch(() => {});
 
-      let responded = false;
+      if (!result.success) {
+        const body = { error: result.error };
+        if (result.code) body.code = result.code;
+        if (result.candidates) body.candidates = result.candidates;
+        return res.status(result.statusCode || 500).json(body);
+      }
 
-      unzipProcess.on('close', async (code) => {
-        if (responded) return;
-        responded = true;
-        try {
-          await fs.promises.unlink(zipPath).catch(() => {});
-
-          if (code !== 0) {
-            await fs.promises.rm(extractDir, { recursive: true, force: true });
-            return res.status(500).json({ error: 'Failed to extract zip file' });
-          }
-
-          const result = await this._importExtractedSession(extractDir, req);
-          await fs.promises.rm(extractDir, { recursive: true, force: true }).catch(() => {});
-
-          if (!result.success) {
-            const body = { error: result.error };
-            if (result.code) body.code = result.code;
-            if (result.candidates) body.candidates = result.candidates;
-            return res.status(result.statusCode || 500).json(body);
-          }
-
-          trackEvent('SessionImported', { format: result.format, fileSize: uploadedFileSize.toString() });
-          const body = { success: true, sessionId: result.sessionId, format: result.format };
-          if (result.project) body.project = result.project;
-          return res.json(body);
-        } catch (err) {
-          console.error('Error importing session:', err);
-          trackException(err, { operation: 'importSession' });
-          await fs.promises.rm(extractDir, { recursive: true, force: true }).catch(() => {});
-          return res.status(500).json({ error: 'Error importing session' });
-        }
+      trackEvent('SessionImported', { format: result.format, fileSize: uploadedFileSize.toString() });
+      req.logger?.info?.('import.completed', {
+        correlationId: req.correlationId,
+        format: result.format,
+        compressedBytes: uploadedFileSize
       });
-
-      unzipProcess.on('error', async (err) => {
-        if (responded) return;
-        responded = true;
-        console.error('Error extracting zip:', err);
-        trackException(err, { operation: 'importSession_unzip' });
-        await fs.promises.unlink(zipPath).catch(() => {});
-        await fs.promises.rm(extractDir, { recursive: true, force: true }).catch(() => {});
-        return res.status(500).json({ error: 'Failed to extract zip file' });
-      });
+      const body = { success: true, sessionId: result.sessionId, format: result.format };
+      if (result.project) body.project = result.project;
+      return res.json(body);
     } catch (err) {
       console.error('Error processing upload:', err);
+      req.logger?.error?.('import.failed', {
+        correlationId: req.correlationId,
+        error: err
+      });
       trackException(err, { operation: 'importSession_upload' });
       if (req.file) await fs.promises.unlink(req.file.path).catch(() => {});
       if (extractDir) await fs.promises.rm(extractDir, { recursive: true, force: true }).catch(() => {});
       // Surface known validation errors as 400
-      if (err.message?.match(/Compressed file too large|Uncompressed size too large|Too many files|Directory nesting too deep|Failed to list zip/)) {
+      if (err.message?.match(/Compressed file too large|Uncompressed size too large|Too many files|Directory nesting too deep|Invalid archive path|Invalid archive entry size|Symbolic links|Failed to read zip/)) {
         return res.status(400).json({ error: err.message });
       }
       return res.status(500).json({ error: 'Error processing upload' });
@@ -186,26 +168,11 @@ class UploadController {
   }
 
   async _validateZipArchive(zipPath) {
-    const MAX_COMPRESSED = 50 * 1024 * 1024, MAX_UNCOMPRESSED = 200 * 1024 * 1024, MAX_FILES = 1000, MAX_DEPTH = 5;
-    const stats = await fs.promises.stat(zipPath);
-    if (stats.size > MAX_COMPRESSED) throw new Error('Compressed file too large (max 50MB)');
-    const listProc = spawn('unzip', ['-l', zipPath]);
-    let out = '';
-    listProc.stdout.on('data', d => { out += d.toString(); });
-    await new Promise((ok, fail) => {
-      listProc.on('close', c => c !== 0 ? fail(new Error('Failed to list zip contents')) : ok());
-      listProc.on('error', fail);
-    });
-    let totalSize = 0, count = 0, maxD = 0;
-    for (const line of out.split('\n')) {
-      const m = line.trim().match(/^\s*(\d+)\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+(.+)$/);
-      if (!m) continue;
-      totalSize += parseInt(m[1], 10); count++;
-      maxD = Math.max(maxD, (m[2].match(/\//g) || []).length);
-    }
-    if (totalSize > MAX_UNCOMPRESSED) throw new Error(`Uncompressed size too large (${Math.round(totalSize/1024/1024)}MB > ${MAX_UNCOMPRESSED/1024/1024}MB)`);
-    if (count > MAX_FILES) throw new Error(`Too many files in archive (${count} > ${MAX_FILES})`);
-    if (maxD > MAX_DEPTH) throw new Error(`Directory nesting too deep (${maxD} > ${MAX_DEPTH})`);
+    return this.zipExtractionService.validate(zipPath);
+  }
+
+  async _extractZipArchive(zipPath, extractDir) {
+    return this.zipExtractionService.extract(zipPath, extractDir);
   }
 
   async _importExtractedSession(extractDir, req) {

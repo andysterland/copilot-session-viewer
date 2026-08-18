@@ -92,7 +92,6 @@ class TagController {
       const savedTags = await this.tagService.setSessionTags(session, tags);
 
       trackEvent('TagUpdated', {
-        sessionId,
         tagCount: savedTags.length.toString()
       });
 

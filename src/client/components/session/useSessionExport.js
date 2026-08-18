@@ -2,6 +2,8 @@
  * Session export composable — download session as zip.
  */
 import { ref } from 'vue';
+import { showErrorDialog } from '../desktop/dialogService.js';
+import { getDesktopBridge } from '../../utils/desktopBridge.js';
 
 export function useSessionExport(sessionId, source) {
   const exporting = ref(false);
@@ -9,6 +11,15 @@ export function useSessionExport(sessionId, source) {
   const exportSession = async () => {
     exporting.value = true;
     try {
+      const desktopBridge = getDesktopBridge();
+      if (desktopBridge) {
+        await desktopBridge.exportSession({
+          source: source.value,
+          sessionId: sessionId.value
+        });
+        return;
+      }
+
       const response = await fetch(`/api/${encodeURIComponent(source.value)}/sessions/${sessionId.value}/export`);
       if (!response.ok) throw new Error('Share failed');
       const blob = await response.blob();
@@ -21,7 +32,11 @@ export function useSessionExport(sessionId, source) {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
     } catch (err) {
-      alert('Failed to share session: ' + err.message);
+      await showErrorDialog({
+        title: 'Session export failed',
+        message: 'Failed to export the session.',
+        detail: err.message
+      });
     } finally {
       exporting.value = false;
     }

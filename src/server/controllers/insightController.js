@@ -33,6 +33,11 @@ class InsightController {
         return { status: 503, body: { error: err.message } };
       }
 
+      if (err.message.includes('CLI was not found')
+        || err.message.startsWith('Configured ')) {
+        return { status: 503, body: { error: err.message } };
+      }
+
     }
 
     return { status: 500, body: { error: 'Error generating insight' } };
@@ -58,24 +63,42 @@ class InsightController {
       }
 
       const startTime = Date.now();
-      const result = await this.insightService.generateInsight(session.id, session.directory, session.source, forceRegenerate);
+      req.logger?.info?.('insight.started', {
+        correlationId: req.correlationId,
+        source: session.source || 'unknown'
+      });
+      const result = await this.insightService.generateInsight(
+        session.id,
+        session.directory,
+        session.source,
+        forceRegenerate,
+        { correlationId: req.correlationId }
+      );
       const durationMs = Date.now() - startTime;
 
       trackEvent('InsightGenerated', {
-        sessionId,
         source: session.source || 'unknown',
         durationMs: durationMs.toString()
       });
 
-      trackMetric('InsightGenerationTime', durationMs, { sessionId, source: session.source || 'unknown' });
+      trackMetric('InsightGenerationTime', durationMs, { source: session.source || 'unknown' });
+      req.logger?.info?.('insight.request-completed', {
+        correlationId: req.correlationId,
+        source: session.source || 'unknown',
+        status: result.status,
+        durationMs
+      });
 
       res.json(result);
     } catch (err) {
       console.error('Error generating insight:', err);
 
       trackException(err, {
-        sessionId: this._getSessionId(req),
         operation: 'generateInsight'
+      });
+      req.logger?.error?.('insight.request-failed', {
+        correlationId: req.correlationId,
+        error: err
       });
 
       const errorResponse = this._getGenerateInsightErrorResponse(err);
@@ -104,7 +127,7 @@ class InsightController {
       const result = await this.insightService.getInsightStatus(session.id, session.directory, session.source);
 
       if (result.status === 'ready' && result.report) {
-        trackEvent('InsightViewed', { sessionId });
+        trackEvent('InsightViewed');
       }
 
       res.json(result);
@@ -134,7 +157,7 @@ class InsightController {
 
       const result = await this.insightService.deleteInsight(session.id, session.directory, session.source);
 
-      trackEvent('InsightDeleted', { sessionId });
+      trackEvent('InsightDeleted');
 
       res.json(result);
     } catch (err) {

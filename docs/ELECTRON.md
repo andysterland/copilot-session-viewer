@@ -98,6 +98,8 @@ The desktop window itself never scrolls. Routed client views scroll inside `.des
 
 On Windows, the taskbar Jump List includes **Add Local Session Folder**. It activates the existing app instance, opens the native directory picker, and routes the selected folder through the same validated registration flow as **File → Add Session Directory**.
 
+Right-clicking selected text or an editable field opens a native edit menu. Read-only selections support copying; inputs add undo, redo, cut, paste, and select-all according to Chromium's edit state. Password selections are never exposed to copy or cut actions.
+
 To add a token, declare a semantic `--desktop-*` variable in `:root`, consume it only in desktop component styles, and add it to `desktopTheme.test.js`. Do not add desktop offsets to browser route components.
 
 All interactive shell elements require an accessible name and visible keyboard focus. Menus use `menu`, `menuitem`, and `separator` roles. Dialogs use `dialog` or `alertdialog`, labelled title/description relationships, and deterministic focus restoration.

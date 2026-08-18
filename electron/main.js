@@ -42,6 +42,7 @@ const {
 } = require('./windowConfig');
 const { showApplicationDialog: presentApplicationDialog } = require('./applicationDialog');
 const { createUpdater } = require('./updater');
+const { createEditContextMenuTemplate } = require('./editContextMenu');
 const {
   createWindowsJumpList,
   hasAddDirectoryArgument
@@ -209,6 +210,15 @@ async function createMainWindow() {
     }
   });
   mainWindow.webContents.on('will-attach-webview', event => event.preventDefault());
+  mainWindow.webContents.on('context-menu', (_event, parameters) => {
+    const template = createEditContextMenuTemplate(parameters);
+    if (template.length === 0) return;
+    logger.info('edit-context-menu.opened', {
+      editable: parameters.isEditable,
+      hasSelection: parameters.selectionText.length > 0
+    });
+    Menu.buildFromTemplate(template).popup({ window: mainWindow });
+  });
   mainWindow.webContents.on('did-start-navigation', (_event, _url, _isInPlace, isMainFrame) => {
     if (isMainFrame && !_isInPlace) {
       rendererShellReady = false;

@@ -123,7 +123,7 @@ import SessionCard from '../components/home/SessionCard.vue';
 import SummaryTooltip from '../components/home/SummaryTooltip.vue';
 import BottomSheet from '../components/home/BottomSheet.vue';
 import { toUrlSource } from '../utils/sourceMapping.js';
-import { isAbsolutePath } from '../utils/pathValidation.cjs';
+import { isAbsolutePath } from '../utils/pathValidation.js';
 import { listDirs, registerDir, removeDir } from '../api/dirs.js';
 
 const router = useRouter();

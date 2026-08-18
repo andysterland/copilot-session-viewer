@@ -1,7 +1,7 @@
 const WINDOWS_DRIVE_PATH = /^[A-Za-z]:[\\/]/;
 const WINDOWS_UNC_PATH = /^\\\\[^\\]+\\[^\\]+/;
 
-function isAbsolutePath(value) {
+export function isAbsolutePath(value) {
   if (typeof value !== 'string') return false;
   const v = value.trim();
   if (v.length === 0) return false;
@@ -13,5 +13,3 @@ function isAbsolutePath(value) {
     || WINDOWS_UNC_PATH.test(v)
   );
 }
-
-module.exports = { isAbsolutePath };

@@ -199,7 +199,8 @@ const currentSourceHintDir = computed(() => {
 });
 
 async function addCustomDirectory() {
-  const dirInput = prompt('Enter absolute directory path (e.g. /home/user/sessions or C:\\Users\\user\\sessions):');
+  const dirInputRaw = prompt('Enter absolute directory path (e.g. /home/user/sessions or C:\\Users\\user\\sessions):');
+  const dirInput = typeof dirInputRaw === 'string' ? dirInputRaw.trim() : dirInputRaw;
   if (!isAbsolutePath(dirInput)) {
     if (dirInput) alert('Path must be absolute (for example /home/user/sessions or C:\\Users\\user\\sessions)');
     return;

@@ -65,11 +65,8 @@ test.describe('Custom Directory Support', () => {
     test('should add a custom directory using the platform-native absolute path', async ({ page }) => {
       await page.goto('/');
 
-      const [dialog] = await Promise.all([
-        page.waitForEvent('dialog'),
-        page.locator('[data-testid="add-dir-btn"]').click()
-      ]);
-      await dialog.accept(CUSTOM_DIR);
+      page.once('dialog', dialog => dialog.accept(CUSTOM_DIR));
+      await page.locator('[data-testid="add-dir-btn"]').click();
       await expect(page.locator('.font-mono', { hasText: 'custom-dir' }).first()).toBeVisible({ timeout: 10000 });
       const sessionCard = page.locator('[data-testid="session-card"]').filter({ hasText: /demo-greeter/i });
       await expect(sessionCard.first()).toBeVisible({ timeout: 10000 });

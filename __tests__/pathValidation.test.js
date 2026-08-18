@@ -1,9 +1,7 @@
-const { execFileSync } = require('child_process');
-const path = require('path');
-const { pathToFileURL } = require('url');
+const { isAbsolutePath } = require('../src/client/utils/pathValidation.js');
 
 describe('isAbsolutePath', () => {
-  const cases = [
+  test.each([
     ['/home/user/sessions', true],
     ['~/sessions', true],
     ['C:\\Users\\user\\sessions', true],
@@ -17,23 +15,7 @@ describe('isAbsolutePath', () => {
     ['   ', false],
     ['', false],
     [null, false],
-  ];
-  const moduleUrl = pathToFileURL(path.resolve(__dirname, '../src/client/utils/pathValidation.js')).href;
-  const script = `
-    import { isAbsolutePath } from ${JSON.stringify(moduleUrl)};
-    const values = JSON.parse(process.argv[1]);
-    process.stdout.write(JSON.stringify(values.map(isAbsolutePath)));
-  `;
-  const results = JSON.parse(execFileSync(
-    process.execPath,
-    ['--input-type=module', '--eval', script, JSON.stringify(cases.map(([value]) => value))],
-    { encoding: 'utf8' }
-  ));
-
-  test.each(cases.map(([value, expected], index) => [value, expected, results[index]]))(
-    'returns %s for %p',
-    (_value, expected, result) => {
-      expect(result).toBe(expected);
-    }
-  );
+  ])('returns %s for %p', (value, expected) => {
+    expect(isAbsolutePath(value)).toBe(expected);
+  });
 });

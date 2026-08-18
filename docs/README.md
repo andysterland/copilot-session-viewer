@@ -7,6 +7,7 @@ Complete documentation for Copilot Session Viewer.
 ## 🚀 Getting Started
 
 - **[📦 Installation Guide](INSTALLATION.md)** - Complete setup instructions for all platforms
+- **[🖥️ Desktop Application](ELECTRON.md)** - Security, settings, updates, packaging, and development
 - **[🔧 Troubleshooting](TROUBLESHOOTING.md)** - Common issues and solutions
 
 ---
@@ -82,6 +83,7 @@ Frontend (Vue 3 SPA + Vite) ↔ Backend (Node.js + Express) ↔ File System
 | Topic | Link | Description |
 |-------|------|-------------|
 | **Installation** | [INSTALLATION.md](INSTALLATION.md) | Setup for all platforms |
+| **Desktop** | [ELECTRON.md](ELECTRON.md) | Electron architecture and operations |
 | **API Reference** | [API.md](API.md) | REST endpoints and examples |
 | **Development** | [DEVELOPMENT.md](DEVELOPMENT.md) | Contributing guidelines |
 | **Troubleshooting** | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Common issues and fixes |

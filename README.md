@@ -38,9 +38,19 @@ npm install -g @qiaolei81/copilot-session-viewer
 copilot-session-viewer
 ```
 
+### Install the desktop application
+
+Download the installer for your platform from [GitHub Releases](https://github.com/andysterland/copilot-session-viewer/releases):
+
+- Windows x64: per-user NSIS installer
+- macOS: separate Intel and Apple Silicon DMG/ZIP artifacts
+- Linux x64: AppImage
+
+The desktop application is an independent distribution. The existing `npx`, npm, and browser server workflows remain unchanged. See the [desktop guide](docs/ELECTRON.md) for updates, signing status, settings, logs, and troubleshooting.
+
 ### Requirements
 
-- Node.js ≥ 18.0.0
+- Node.js ≥ 22.0.0 for npm/browser installations (desktop installers include their runtime)
 - At least one AI coding assistant (optional for generating sessions):
   - [GitHub Copilot CLI](https://github.com/cli/cli) (recommended)
   - [Claude Code CLI](https://github.com/anthropics/claude-code)
@@ -64,6 +74,7 @@ copilot-session-viewer
 - **📱 Responsive** - Works on desktop, tablet, and mobile
 - **⚡ Fast** - Optimized virtual rendering and lazy loading
 - **🔐 Secure** - Local-first with no data sharing, XSS protection, ZIP bomb defense
+- **🖥️ Optional Desktop Host** - Themed native shell, accessible menus/dialogs, sandboxed renderer, native file pickers, local authenticated API, and automatic updates
 
 ### 🛠️ **Technical Features**
 - **Vue 3** - Reactive virtual scrolling
@@ -112,6 +123,7 @@ npx @qiaolei81/copilot-session-viewer
 ## 📚 Documentation
 
 - **[Installation Guide](docs/INSTALLATION.md)** - Detailed setup instructions
+- **[Desktop Guide](docs/ELECTRON.md)** - Electron shell, security, settings, and troubleshooting
 - **[API Documentation](docs/API.md)** - REST endpoints and responses
 - **[Development Guide](docs/DEVELOPMENT.md)** - Contributing and local development
 - **[Troubleshooting](docs/TROUBLESHOOTING.md)** - Common issues and solutions
@@ -169,6 +181,12 @@ GitHub Actions workflow includes:
 ## 🏗️ Architecture
 
 ```
+┌─────────────────────────────────────────────────┐
+│  Optional Electron host                         │
+│  Main process → preload allowlist → Vue renderer│
+│  Starts authenticated Express on 127.0.0.1:0    │
+└─────────────────────────────────────────────────┘
+                      ↕ local HTTP + narrow IPC
 ┌─────────────────────────────────────────────────┐
 │  Frontend (Vue 3 SPA + Vite + Pinia)            │
 │  • Virtual Scroller (vue-virtual-scroller)      │
@@ -251,7 +269,8 @@ All session sources are normalized to a consistent schema:
 - No external API calls for session data
 - All processing happens locally
 - Optional AI insights require user action
-- No telemetry or tracking
+- Desktop telemetry is disabled by default and requires explicit opt-in
+- Rotating, redacted desktop diagnostic logs remain local
 
 ---
 

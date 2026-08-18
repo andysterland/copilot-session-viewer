@@ -8,7 +8,7 @@ Complete installation instructions for Copilot Session Viewer.
 
 ### Required
 
-- **Node.js** ≥ 18.0.0 (LTS recommended)
+- **Node.js** ≥ 22.0.0 (LTS recommended) for npm/browser installations
 - **npm** ≥ 9.0.0 or **yarn** ≥ 1.22.0
 - **GitHub Copilot CLI** (for session data generation)
 
@@ -20,7 +20,23 @@ Complete installation instructions for Copilot Session Viewer.
 
 ## Installation Methods
 
-### Method 1: NPX (Recommended for Trying)
+### Method 1: Desktop Installer
+
+**Best for:** Native desktop integration, automatic updates, and no separate Node.js installation
+
+Download an artifact from [GitHub Releases](https://github.com/andysterland/copilot-session-viewer/releases):
+
+- Windows x64: NSIS installer (per-user; settings are retained on uninstall)
+- macOS Intel or Apple Silicon: DMG or ZIP
+- Linux x64: AppImage
+
+Windows and Linux use a themed custom title bar, File/View/Help menus, and window controls. macOS keeps native traffic lights in a themed inset title region. Application confirmations and text prompts use accessible in-app dialogs; file, folder, executable, and save pickers remain native.
+
+Unsigned development artifacts may show operating-system warnings. Production releases are signing/notarization-ready; verify the release notes and platform `SHA256SUMS-*` file. See [ELECTRON.md](ELECTRON.md).
+
+---
+
+### Method 2: NPX (Recommended for Trying)
 
 **Best for:** First-time users, occasional use, always getting the latest version
 
@@ -42,7 +58,7 @@ npx -y @qiaolei81/copilot-session-viewer
 
 ---
 
-### Method 2: Global Installation
+### Method 3: Global Installation
 
 **Best for:** Regular users, offline usage, faster startup times
 
@@ -72,7 +88,7 @@ npm update -g @qiaolei81/copilot-session-viewer
 
 ---
 
-### Method 3: Local Installation (Development)
+### Method 4: Local Installation (Development)
 
 **Best for:** Developers, customization, contributing
 
@@ -182,6 +198,11 @@ MODERNIZE_SESSION_DIR=/path/to/modernize/session-state  # Modernize CLI
 # Feature Flags
 ENABLE_INSIGHTS=true
 ENABLE_EXPORT=true
+
+# Optional AI CLI executable overrides
+COPILOT_CLI_PATH=/absolute/path/to/copilot
+CLAUDE_CLI_PATH=/absolute/path/to/claude
+PI_CLI_PATH=/absolute/path/to/pi
 ```
 
 ### Custom Session Directory
@@ -263,6 +284,8 @@ brew install node
 npm install -g @qiaolei81/copilot-session-viewer
 ```
 
+Desktop applications do not inherit every interactive-shell PATH entry. Use **File → Desktop Settings** to select `copilot`, `claude`, or `pi` when an insight command cannot be found.
+
 ### Windows
 
 ```powershell
@@ -289,6 +312,15 @@ sudo yum install -y nodejs
 # Then install Copilot Session Viewer
 npm install -g @qiaolei81/copilot-session-viewer
 ```
+
+For the AppImage:
+
+```bash
+chmod +x copilot-session-viewer-*.AppImage
+./copilot-session-viewer-*.AppImage
+```
+
+Some desktop environments do not integrate AppImages or their update metadata automatically; launch the downloaded AppImage directly when necessary.
 
 ---
 

@@ -85,9 +85,16 @@ npm run dev
 # Run tests
 npm run test:all
 
+# Desktop-only validation
+npm run test:electron
+npm run test:electron:e2e
+npm run electron:unpacked
+
 # Lint and fix
 npm run lint:fix
 ```
+
+Desktop shell changes belong in `src/client/components/desktop/` and must remain gated by `getDesktopBridge()`. Add menu commands to the shared `electron/menuCommands.js` model, keep IPC methods narrowly scoped and schema validated, and use the dialog service instead of browser `alert`, `confirm`, or `prompt`. Update platform configuration/unit coverage and Electron Playwright coverage for shell behavior; browser layout must remain unchanged.
 
 ### Project Structure
 

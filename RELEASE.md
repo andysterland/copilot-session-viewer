@@ -60,6 +60,9 @@ Before running `npm run release:*`, ensure:
 - [ ] Working directory is clean (`git status`)
 - [ ] You're on `main` branch
 - [ ] Branch is up to date with remote
+- [ ] Electron unit and Playwright tests pass (`npm run test:electron && npm run test:electron:e2e`)
+- [ ] Platform packages contain licenses, SBOM, updater metadata, and checksums
+- [ ] Windows signatures and Apple signing/notarization are verified for a public production release
 
 ---
 
@@ -75,6 +78,19 @@ graph LR
     F --> G[Publish to npm]
     F --> H[Upload .tgz to release]
 ```
+
+    ## Desktop Releases
+
+    The `desktop-release.yml` workflow runs separately from npm publishing. A `v*` tag creates a draft release, builds Windows NSIS, macOS DMG/ZIP (x64 and arm64), and Linux AppImage artifacts, then publishes only after every platform succeeds. `package.json` is the authoritative version for npm, Electron, artifact names, and updater metadata.
+
+    Required production signing secrets are documented by name in the workflow and remain in GitHub Actions:
+
+    - Windows: `WINDOWS_CSC_LINK`, `WINDOWS_CSC_KEY_PASSWORD`
+    - Apple: `MACOS_CSC_LINK`, `MACOS_CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`
+
+    Unsigned PR/nightly artifacts must be labeled as unsigned. They do not receive the production-release marker, so update checks remain disabled. Rotate certificates before expiration, update the relevant repository secrets, and validate signatures before publishing. If signing is unavailable, keep the release as a draft.
+
+    To halt a faulty release, mark it as draft or delete its updater metadata. Publish a higher patch version for rollback; the updater rejects downgrades. Do not replace files on a published version because clients verify signatures and checksums.
 
 ---
 

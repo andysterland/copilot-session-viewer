@@ -101,7 +101,9 @@ describe('InsightController - Additional Coverage', () => {
 
       await controller.generateInsight(mockReq, mockRes);
 
-      expect(mockInsightService.generateInsight).toHaveBeenCalledWith('valid-session-id', '/path/to/session', 'copilot', true);
+      expect(mockInsightService.generateInsight).toHaveBeenCalledWith(
+        'valid-session-id', '/path/to/session', 'copilot', true, { correlationId: undefined }
+      );
       expect(mockRes.json).toHaveBeenCalledWith({ status: 'generating' });
     });
 
@@ -112,7 +114,9 @@ describe('InsightController - Additional Coverage', () => {
 
       await controller.generateInsight(mockReq, mockRes);
 
-      expect(mockInsightService.generateInsight).toHaveBeenCalledWith('valid-session-id', '/path/to/session', 'copilot', false);
+      expect(mockInsightService.generateInsight).toHaveBeenCalledWith(
+        'valid-session-id', '/path/to/session', 'copilot', false, { correlationId: undefined }
+      );
       expect(mockRes.json).toHaveBeenCalledWith({ status: 'completed' });
     });
 
@@ -123,7 +127,9 @@ describe('InsightController - Additional Coverage', () => {
 
       await controller.generateInsight(mockReq, mockRes);
 
-      expect(mockInsightService.generateInsight).toHaveBeenCalledWith('valid-session-id', '/path/to/session', 'copilot', false);
+      expect(mockInsightService.generateInsight).toHaveBeenCalledWith(
+        'valid-session-id', '/path/to/session', 'copilot', false, { correlationId: undefined }
+      );
     });
 
     it('should handle missing force field in body', async () => {
@@ -133,7 +139,9 @@ describe('InsightController - Additional Coverage', () => {
 
       await controller.generateInsight(mockReq, mockRes);
 
-      expect(mockInsightService.generateInsight).toHaveBeenCalledWith('valid-session-id', '/path/to/session', 'copilot', false);
+      expect(mockInsightService.generateInsight).toHaveBeenCalledWith(
+        'valid-session-id', '/path/to/session', 'copilot', false, { correlationId: undefined }
+      );
     });
 
     it('should handle session not found', async () => {
@@ -529,7 +537,9 @@ describe('InsightController - Additional Coverage', () => {
       mockInsightService.generateInsight.mockResolvedValue({ status: 'generating' });
       await controller.generateInsight(mockReq, mockRes);
 
-      expect(mockInsightService.generateInsight).toHaveBeenCalledWith(sessionId, '/path/to/regen-session', 'copilot', true);
+      expect(mockInsightService.generateInsight).toHaveBeenCalledWith(
+        sessionId, '/path/to/regen-session', 'copilot', true, { correlationId: undefined }
+      );
     });
   });
 });

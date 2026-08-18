@@ -22,7 +22,11 @@ describe('InsightService', () => {
 
   beforeEach(async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'insight-test-'));
-    service = new InsightService(tmpDir);
+    service = new InsightService({
+      executableResolver: {
+        resolve: jest.fn(executable => Promise.resolve(executable))
+      }
+    });
     sessionId = 'test-session-id';
 
     // Reset all mocks
@@ -221,7 +225,41 @@ describe('InsightService', () => {
           stdio: ['pipe', 'pipe', 'pipe']
         })
       );
-      expect(processManager.register).toHaveBeenCalledWith(mockProcess, { name: `insight-${sessionId}` });
+      expect(processManager.register).toHaveBeenCalledWith(mockProcess, {
+        name: `insight-${sessionId}`,
+        processGroup: process.platform !== 'win32'
+      });
+    });
+
+    it('should invoke resolved JavaScript CLI entry points through Node without a shell', async () => {
+      const sessionPath = path.join(tmpDir, sessionId);
+      const entryPoint = path.join(tmpDir, 'copilot-cli.js');
+      await fs.mkdir(sessionPath, { recursive: true });
+      await fs.writeFile(path.join(sessionPath, 'events.jsonl'), '{"type":"test"}');
+      await fs.writeFile(entryPoint, 'console.log("fixture");');
+      service = new InsightService({
+        executableResolver: {
+          resolveInvocation: jest.fn().mockResolvedValue({
+            command: process.execPath,
+            args: [entryPoint],
+            resolvedPath: entryPoint
+          })
+        }
+      });
+      const { mockProcess } = createMockCopilotProcess();
+      setupFileMocks();
+      spawn.mockReturnValue(mockProcess);
+
+      await service.generateInsight(sessionId, sessionPath, 'copilot', false);
+
+      expect(spawn).toHaveBeenCalledWith(
+        process.execPath,
+        expect.arrayContaining([entryPoint, '--config-dir', '--yolo', '-p']),
+        expect.objectContaining({
+          shell: false,
+          cwd: sessionPath
+        })
+      );
     });
 
     it('should handle empty session data', async () => {

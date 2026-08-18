@@ -11,14 +11,14 @@ test.describe('Export Tests', () => {
     for (const session of sessions) {
       if (session?.hasEvents && session.eventCount > 0) {
         sessionId = session.id;
-        sessionSource = session.source;
+        sessionSource = session.urlSource;
         break;
       }
     }
 
     if (!sessionId && sessions.length > 0) {
       sessionId = sessions[0].id;
-      sessionSource = sessions[0].source;
+      sessionSource = sessions[0].urlSource;
     }
 
     if (!sessionId) {
@@ -81,6 +81,17 @@ test.describe('Export Tests', () => {
         const btnText = await exportBtn.first().textContent();
         expect(btnText?.toLowerCase()).toContain('share');
       }
+    });
+
+    test('downloads the session archive in browser mode', async ({ page }) => {
+      await page.goto(`/#/${sessionSource}/session/${sessionId}`);
+      await page.waitForSelector('[data-testid="session-layout"]', { timeout: 10000 });
+
+      const downloadPromise = page.waitForEvent('download');
+      await page.getByTestId('export-btn').click();
+      const download = await downloadPromise;
+
+      expect(download.suggestedFilename()).toBe(`session-${sessionId}.zip`);
     });
   });
 });

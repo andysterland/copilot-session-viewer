@@ -353,7 +353,13 @@ describe('Server API Endpoints', () => {
         .expect(200);
 
       expect(response.body.status).toBe('completed');
-      expect(mockInsightService.generateInsight).toHaveBeenCalledWith('valid-session', '/path/to/session', 'copilot', false);
+      expect(mockInsightService.generateInsight).toHaveBeenCalledWith(
+        'valid-session',
+        '/path/to/session',
+        'copilot',
+        false,
+        expect.objectContaining({ correlationId: expect.any(String) })
+      );
     });
 
     it('should handle session not found', async () => {

@@ -1,396 +1,136 @@
 const { EventEmitter } = require('events');
 
+process.env.PROCESS_MANAGER_DISABLE_SIGNAL_HANDLERS = 'true';
+const { ProcessManager } = require('../src/server/utils/processManager');
+
+function createChild(pid, onKill = null) {
+  const child = Object.assign(new EventEmitter(), {
+    pid,
+    exitCode: null,
+    signalCode: null,
+    kill: jest.fn(signal => {
+      onKill?.(child, signal);
+    })
+  });
+  return child;
+}
+
 describe('ProcessManager', () => {
-  let processManager;
-  let exitSpy;
-  let setTimeoutSpy;
-  let consoleLogSpy;
-  let consoleErrorSpy;
+  let manager;
 
   beforeEach(() => {
-    // Clear module cache to get fresh instance
-    jest.resetModules();
-
-    // Mock console methods
-    consoleLogSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
-    consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
-
-    // Mock process.exit
-    exitSpy = jest.spyOn(process, 'exit').mockImplementation(() => {});
-
-    // Mock setTimeout
-    setTimeoutSpy = jest.spyOn(global, 'setTimeout').mockImplementation((fn) => {
-      fn(); // Execute immediately for tests
-      return 123;
+    manager = new ProcessManager({
+      platform: 'linux',
+      signalHandlers: false,
+      gracePeriodMs: 5,
+      forcePeriodMs: 10
     });
-
-    // Require fresh instance after mocking
-    processManager = require('../src/server/utils/processManager');
+    jest.spyOn(console, 'log').mockImplementation(() => {});
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+    jest.spyOn(console, 'error').mockImplementation(() => {});
   });
 
   afterEach(() => {
-    consoleLogSpy.mockRestore();
-    consoleErrorSpy.mockRestore();
-    exitSpy.mockRestore();
-    setTimeoutSpy.mockRestore();
-
-    // Clear active processes
-    processManager.activeProcesses.clear();
-    processManager.isShuttingDown = false;
+    jest.restoreAllMocks();
   });
 
-  describe('constructor', () => {
-    it('should initialize with empty activeProcesses set', () => {
-      expect(processManager.activeProcesses).toBeInstanceOf(Set);
-      expect(processManager.activeProcesses.size).toBe(0);
-    });
-
-    it('should initialize with isShuttingDown as false', () => {
-      expect(processManager.isShuttingDown).toBe(false);
-    });
+  it('initializes without active processes', () => {
+    expect(manager.activeProcesses).toBeInstanceOf(Set);
+    expect(manager.getActiveCount()).toBe(0);
+    expect(manager.isShuttingDown).toBe(false);
   });
 
-  describe('register', () => {
-    it('should register a process and return processInfo', () => {
-      const mockProcess = new EventEmitter();
-      const metadata = { name: 'test-process' };
+  it('registers metadata and removes a process when it exits', () => {
+    const child = createChild(123);
+    const metadata = { name: 'test-process' };
+    const processInfo = manager.register(child, metadata);
 
-      const processInfo = processManager.register(mockProcess, metadata);
+    expect(processInfo).toEqual(expect.objectContaining({
+      process: child,
+      metadata,
+      startTime: expect.any(Number)
+    }));
+    expect(manager.getActiveCount()).toBe(1);
 
-      expect(processInfo).toBeDefined();
-      expect(processInfo.process).toBe(mockProcess);
-      expect(processInfo.metadata).toBe(metadata);
-      expect(processInfo.startTime).toBeGreaterThan(0);
-      expect(processManager.activeProcesses.has(processInfo)).toBe(true);
-      expect(processManager.activeProcesses.size).toBe(1);
-    });
-
-    it('should handle process with metadata containing name', () => {
-      const mockProcess = new EventEmitter();
-      const metadata = { name: 'copilot-insight' };
-
-      processManager.register(mockProcess, metadata);
-
-      expect(processManager.activeProcesses.size).toBe(1);
-    });
-
-    it('should handle process without metadata', () => {
-      const mockProcess = new EventEmitter();
-
-      const processInfo = processManager.register(mockProcess);
-
-      expect(processInfo.metadata).toEqual({});
-      expect(processManager.activeProcesses.size).toBe(1);
-    });
-
-    it('should remove process from set when it exits', () => {
-      const mockProcess = new EventEmitter();
-      const metadata = { name: 'exit-test' };
-
-      processManager.register(mockProcess, metadata);
-      expect(processManager.activeProcesses.size).toBe(1);
-
-      // Simulate process exit
-      mockProcess.emit('exit');
-
-      expect(processManager.activeProcesses.size).toBe(0);
-      expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Process exited (exit-test)')
-      );
-    });
-
-    it('should log duration when process exits', () => {
-      const mockProcess = new EventEmitter();
-      const metadata = { name: 'duration-test' };
-
-      processManager.register(mockProcess, metadata);
-      mockProcess.emit('exit');
-
-      expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringMatching(/Process exited \(duration-test\): \d+ms/)
-      );
-    });
-
-    it('should handle process exit with unknown name', () => {
-      const mockProcess = new EventEmitter();
-
-      processManager.register(mockProcess);
-      mockProcess.emit('exit');
-
-      expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Process exited (unknown)')
-      );
-    });
+    child.exitCode = 0;
+    child.emit('exit', 0);
+    expect(manager.getActiveCount()).toBe(0);
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Process exited (test-process)'));
   });
 
-  describe('killAll', () => {
-    it('should kill all active processes', () => {
-      const mockProcess1 = { kill: jest.fn(), killed: false, pid: 123 };
-      const mockProcess2 = { kill: jest.fn(), killed: false, pid: 456 };
-
-      processManager.activeProcesses.add({
-        process: mockProcess1,
-        metadata: { name: 'process-1' },
-        startTime: Date.now()
-      });
-      processManager.activeProcesses.add({
-        process: mockProcess2,
-        metadata: { name: 'process-2' },
-        startTime: Date.now()
-      });
-
-      processManager.killAll();
-
-      expect(mockProcess1.kill).toHaveBeenCalledWith('SIGTERM');
-      expect(mockProcess2.kill).toHaveBeenCalledWith('SIGTERM');
-      expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Killing 2 active processes')
-      );
-      expect(processManager.activeProcesses.size).toBe(0);
+  it('uses the PID in cleanup when no process name is provided', async () => {
+    const child = createChild(999, (current, signal) => {
+      current.signalCode = signal;
+      current.emit('exit', null, signal);
     });
+    manager.register(child);
 
-    it('should not kill already killed processes', () => {
-      const mockProcess = { kill: jest.fn(), killed: true, pid: 123 };
+    await expect(manager.killAll()).resolves.toEqual({ requested: 1, remaining: 0 });
 
-      processManager.activeProcesses.add({
-        process: mockProcess,
-        metadata: { name: 'already-killed' },
-        startTime: Date.now()
-      });
-
-      processManager.killAll();
-
-      expect(mockProcess.kill).not.toHaveBeenCalled();
-    });
-
-    it('should handle kill errors gracefully', () => {
-      const mockProcess = {
-        kill: jest.fn(() => { throw new Error('Kill failed'); }),
-        killed: false,
-        pid: 123
-      };
-
-      processManager.activeProcesses.add({
-        process: mockProcess,
-        metadata: { name: 'error-process' },
-        startTime: Date.now()
-      });
-
-      processManager.killAll();
-
-      expect(consoleErrorSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Failed to kill error-process'),
-        'Kill failed'
-      );
-      expect(processManager.activeProcesses.size).toBe(0);
-    });
-
-    it('should log process name when killing', () => {
-      const mockProcess = { kill: jest.fn(), killed: false, pid: 123 };
-
-      processManager.activeProcesses.add({
-        process: mockProcess,
-        metadata: { name: 'named-process' },
-        startTime: Date.now()
-      });
-
-      processManager.killAll();
-
-      expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Killed named-process')
-      );
-    });
-
-    it('should log process PID when name is not available', () => {
-      const mockProcess = { kill: jest.fn(), killed: false, pid: 999 };
-
-      processManager.activeProcesses.add({
-        process: mockProcess,
-        metadata: {},
-        startTime: Date.now()
-      });
-
-      processManager.killAll();
-
-      expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Killed 999')
-      );
-    });
-
-    it('should clear activeProcesses set after killing all', () => {
-      const mockProcess1 = { kill: jest.fn(), killed: false, pid: 123 };
-      const mockProcess2 = { kill: jest.fn(), killed: false, pid: 456 };
-
-      processManager.activeProcesses.add({
-        process: mockProcess1,
-        metadata: {},
-        startTime: Date.now()
-      });
-      processManager.activeProcesses.add({
-        process: mockProcess2,
-        metadata: {},
-        startTime: Date.now()
-      });
-
-      expect(processManager.activeProcesses.size).toBe(2);
-      processManager.killAll();
-      expect(processManager.activeProcesses.size).toBe(0);
-    });
+    expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Stopping 1 active processes'));
   });
 
-  describe('getActiveCount', () => {
-    it('should return 0 when no processes are active', () => {
-      expect(processManager.getActiveCount()).toBe(0);
-    });
+  it('stops every active process and waits for exit', async () => {
+    const children = [123, 456].map(pid => createChild(pid, (current, signal) => {
+      current.signalCode = signal;
+      current.emit('exit', null, signal);
+    }));
+    children.forEach((child, index) => manager.register(child, { name: `process-${index}` }));
 
-    it('should return correct count of active processes', () => {
-      const mockProcess1 = new EventEmitter();
-      const mockProcess2 = new EventEmitter();
-      const mockProcess3 = new EventEmitter();
+    await manager.killAll();
 
-      processManager.register(mockProcess1);
-      expect(processManager.getActiveCount()).toBe(1);
-
-      processManager.register(mockProcess2);
-      expect(processManager.getActiveCount()).toBe(2);
-
-      processManager.register(mockProcess3);
-      expect(processManager.getActiveCount()).toBe(3);
-    });
-
-    it('should return updated count after process exits', () => {
-      const mockProcess1 = new EventEmitter();
-      const mockProcess2 = new EventEmitter();
-
-      processManager.register(mockProcess1);
-      processManager.register(mockProcess2);
-      expect(processManager.getActiveCount()).toBe(2);
-
-      mockProcess1.emit('exit');
-      expect(processManager.getActiveCount()).toBe(1);
-
-      mockProcess2.emit('exit');
-      expect(processManager.getActiveCount()).toBe(0);
-    });
+    expect(children[0].kill).toHaveBeenCalledWith('SIGTERM');
+    expect(children[1].kill).toHaveBeenCalledWith('SIGTERM');
+    expect(manager.getActiveCount()).toBe(0);
   });
 
-  describe('_setupCleanupHandlers - SIGTERM', () => {
-    it('should handle SIGTERM signal', () => {
-      // Reset and get fresh instance to capture listeners
-      jest.resetModules();
-      const freshProcessManager = require('../src/server/utils/processManager');
-
-      const mockProcess = { kill: jest.fn(), killed: false, pid: 123 };
-      freshProcessManager.activeProcesses.add({
-        process: mockProcess,
-        metadata: { name: 'sigterm-test' },
-        startTime: Date.now()
-      });
-
-      // Emit SIGTERM
-      process.emit('SIGTERM');
-
-      expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Received SIGTERM')
-      );
-      expect(mockProcess.kill).toHaveBeenCalledWith('SIGTERM');
-      expect(exitSpy).toHaveBeenCalledWith(0);
+  it('escalates a process that ignores SIGTERM', async () => {
+    const child = createChild(321, (current, signal) => {
+      if (signal === 'SIGKILL') {
+        current.signalCode = signal;
+        current.emit('exit', null, signal);
+      }
     });
+    manager.register(child, { name: 'stubborn' });
 
-    it('should not run cleanup twice on subsequent SIGTERM', () => {
-      jest.resetModules();
-      const freshProcessManager = require('../src/server/utils/processManager');
+    await manager.killAll();
 
-      freshProcessManager.isShuttingDown = false;
-
-      // First SIGTERM
-      process.emit('SIGTERM');
-      expect(freshProcessManager.isShuttingDown).toBe(true);
-
-      consoleLogSpy.mockClear();
-      exitSpy.mockClear();
-
-      // Second SIGTERM should be ignored
-      process.emit('SIGTERM');
-      expect(consoleLogSpy).not.toHaveBeenCalledWith(
-        expect.stringContaining('Received SIGTERM')
-      );
-    });
+    expect(child.kill).toHaveBeenNthCalledWith(1, 'SIGTERM');
+    expect(child.kill).toHaveBeenNthCalledWith(2, 'SIGKILL');
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('Force stopping 1'));
   });
 
-  describe('_setupCleanupHandlers - SIGINT', () => {
-    it('should handle SIGINT signal (Ctrl+C)', () => {
-      jest.resetModules();
-      const freshProcessManager = require('../src/server/utils/processManager');
-
-      const mockProcess = { kill: jest.fn(), killed: false, pid: 456 };
-      freshProcessManager.activeProcesses.add({
-        process: mockProcess,
-        metadata: { name: 'sigint-test' },
-        startTime: Date.now()
-      });
-
-      // Emit SIGINT
-      process.emit('SIGINT');
-
-      expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Received SIGINT')
-      );
-      expect(mockProcess.kill).toHaveBeenCalledWith('SIGTERM');
-      expect(exitSpy).toHaveBeenCalledWith(0);
+  it('contains kill errors and reports a process that remains alive', async () => {
+    const child = createChild(654);
+    child.kill.mockImplementation(() => {
+      throw new Error('Kill failed');
     });
+    manager.register(child, { name: 'error-process' });
+
+    await expect(manager.killAll()).resolves.toEqual({ requested: 1, remaining: 1 });
+
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to stop error-process'),
+      'Kill failed'
+    );
+    expect(manager.getActiveCount()).toBe(1);
   });
 
-  describe('_setupCleanupHandlers - uncaughtException', () => {
-    it('should handle uncaught exceptions', () => {
-      jest.resetModules();
-      const freshProcessManager = require('../src/server/utils/processManager');
-
-      const mockProcess = { kill: jest.fn(), killed: false, pid: 789 };
-      freshProcessManager.activeProcesses.add({
-        process: mockProcess,
-        metadata: { name: 'exception-test' },
-        startTime: Date.now()
-      });
-
-      const testError = new Error('Test uncaught exception');
-
-      // Emit uncaughtException
-      process.emit('uncaughtException', testError);
-
-      expect(consoleErrorSpy).toHaveBeenCalledWith(
-        '💥 Uncaught exception:',
-        testError
-      );
-      expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Received uncaughtException')
-      );
-      expect(mockProcess.kill).toHaveBeenCalledWith('SIGTERM');
-      expect(exitSpy).toHaveBeenCalledWith(1); // Error exit code
+  it('shares one asynchronous cleanup operation across concurrent callers', async () => {
+    const child = createChild(777, (current, signal) => {
+      current.signalCode = signal;
+      current.emit('exit', null, signal);
     });
+    manager.register(child);
 
-    it('should exit with code 1 on uncaught exception', () => {
-      jest.resetModules();
-      require('../src/server/utils/processManager');
+    const first = manager.killAll();
+    const second = manager.killAll();
 
-      process.emit('uncaughtException', new Error('Fatal error'));
-
-      expect(exitSpy).toHaveBeenCalledWith(1);
-    });
-  });
-
-  describe('cleanup handler timeout', () => {
-    it('should call setTimeout with 1000ms delay', () => {
-      setTimeoutSpy.mockRestore();
-      const realSetTimeoutSpy = jest.spyOn(global, 'setTimeout').mockImplementation(() => {});
-
-      jest.resetModules();
-      require('../src/server/utils/processManager');
-
-      process.emit('SIGTERM');
-
-      expect(realSetTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 1000);
-      realSetTimeoutSpy.mockRestore();
-    });
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { requested: 1, remaining: 0 },
+      { requested: 1, remaining: 0 }
+    ]);
+    expect(child.kill).toHaveBeenCalledTimes(1);
   });
 });

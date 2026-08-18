@@ -39,7 +39,14 @@ const createApp = require('../src/server/app');
 let app;
 
 beforeAll(() => {
-  app = createApp();
+  // Exercise the real HTTP/controller stack without launching a developer's
+  // installed AI CLI or writing generated insight files during unit tests.
+  const insightService = {
+    generateInsight: async () => ({ status: 'completed', report: '# Fixture insight' }),
+    getInsightStatus: async () => ({ status: 'completed', report: '# Fixture insight' }),
+    deleteInsight: async () => ({ success: true })
+  };
+  app = createApp({ insightService });
 });
 
 afterAll(() => {

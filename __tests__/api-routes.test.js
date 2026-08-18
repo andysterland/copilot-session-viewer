@@ -365,7 +365,11 @@ describe('API Routes Integration Tests', () => {
         .expect(200);
 
       expect(mockInsightService.generateInsight).toHaveBeenCalledWith(
-        VALID_SESSION_ID, '/path/to/session', 'copilot', true
+        VALID_SESSION_ID,
+        '/path/to/session',
+        'copilot',
+        true,
+        expect.objectContaining({ correlationId: expect.any(String) })
       );
     });
 

@@ -1,851 +1,386 @@
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
-const { spawn } = require('child_process');
+const express = require('express');
+const request = require('supertest');
+const AdmZip = require('adm-zip');
 const UploadController = require('../src/server/controllers/uploadController');
-const processManager = require('../src/server/utils/processManager');
+const {
+  inspectEntry,
+  openAndValidateArchive
+} = require('../src/server/workers/zipExtractorWorker');
 
-// Mock child_process and processManager
-jest.mock('child_process');
-jest.mock('../src/server/utils/processManager');
-
-// Helper: Create res object with Promise wrapper for async testing
-function createAsyncRes() {
-  let resolveResponse;
-  const responsePromise = new Promise((resolve) => {
-    resolveResponse = resolve;
-  });
-  
-  let statusCode = 200;
-  
-  const res = {
-    _statusCode: 200,
+function createResponse() {
+  return {
+    statusCode: 200,
+    body: null,
     status(code) {
-      statusCode = code;
-      this._statusCode = code;
+      this.statusCode = code;
       return this;
     },
-    json(data) {
-      resolveResponse({ status: statusCode, body: data });
-      return this;
-    },
-    download(filePath, filename, callback) {
-      resolveResponse({ downloaded: true, path: filePath, filename });
-      if (callback) callback();
-      return this;
-    },
-    sendFile(filePath) {
-      resolveResponse({ sentFile: filePath });
+    json(body) {
+      this.body = body;
       return this;
     }
   };
-  
-  // Spy on methods
-  jest.spyOn(res, 'status');
-  jest.spyOn(res, 'json');
-  
-  res.responsePromise = responsePromise;
-  return res;
 }
 
-// Helper: Setup for importSession tests with proper async handling
-async function setupImportSessionTest(controller, req, fsMocks = {}) {
-  const res = createAsyncRes();
-  
-  let listCloseHandler, listErrorHandler;
-  let extractCloseHandler, extractErrorHandler;
-  
-  let spawnCallCount = 0;
-  
-  // Mock process for `unzip -l` (list contents - first call)
-  const mockListProcess = {
-    on: jest.fn((event, handler) => {
-      if (event === 'close') listCloseHandler = handler;
-      if (event === 'error') listErrorHandler = handler;
-      return mockListProcess;
-    }),
-    stdout: {
-      on: jest.fn((event, handler) => {
-        if (event === 'data') {
-          // Simulate unzip -l output with reasonable size
-          const mockOutput = `Archive:  test.zip
-  Length      Date    Time    Name
----------  ---------- -----   ----
-    10240  2024-02-23 12:00   test-session/
-     1024  2024-02-23 12:00   test-session/events.jsonl
----------                     -------
-    11264                     2 files\n`;
-          handler(Buffer.from(mockOutput));
-        }
-        return mockListProcess.stdout;
-      })
-    }
-  };
-  
-  // Mock process for `unzip -q` (extract - second call)
-  const mockExtractProcess = {
-    on: jest.fn((event, handler) => {
-      if (event === 'close') extractCloseHandler = handler;
-      if (event === 'error') extractErrorHandler = handler;
-      return mockExtractProcess;
-    })
-  };
-  
-  // Return different mock processes for different spawn calls
-  spawn.mockImplementation((cmd, args) => {
-    spawnCallCount++;
-    if (spawnCallCount === 1 && args && args[0] === '-l') {
-      // First call: unzip -l (list)
-      return mockListProcess;
-    } else {
-      // Second call: unzip -q (extract)
-      return mockExtractProcess;
-    }
+function createUploadApp(controller) {
+  const app = express();
+  app.post('/upload', controller.getUploadMiddleware(), (req, res) => {
+    res.json({
+      fieldname: req.file?.fieldname,
+      filename: req.file?.originalname,
+      mimetype: req.file?.mimetype
+    });
   });
-
-  // Mock fs operations with defaults
-  jest.spyOn(fs.promises, 'mkdir').mockResolvedValue();
-  jest.spyOn(fs.promises, 'writeFile').mockResolvedValue();
-  jest.spyOn(fs.promises, 'readFile').mockResolvedValue('');
-  jest.spyOn(fs.promises, 'stat').mockImplementation(async (p) => {
-    if (fsMocks.stat) return fsMocks.stat(p);
-    // Return proper stat-like objects for adapter detection
-    return { size: 1000, isDirectory: () => true, isFile: () => false };
+  app.use((error, _req, res, _next) => {
+    res.status(400).json({ error: error.message });
   });
-  jest.spyOn(fs.promises, 'unlink').mockResolvedValue();
-  jest.spyOn(fs.promises, 'rm').mockResolvedValue();
-  
-  if (fsMocks.readdir) jest.spyOn(fs.promises, 'readdir').mockResolvedValue(fsMocks.readdir);
-  if (fsMocks.access) jest.spyOn(fs.promises, 'access').mockImplementation(fsMocks.access);
-  if (fsMocks.rename) jest.spyOn(fs.promises, 'rename').mockImplementation(fsMocks.rename);
-  if (fsMocks.existsSync !== undefined) {
-    if (typeof fsMocks.existsSync === 'function') {
-      jest.spyOn(fs, 'existsSync').mockImplementation(fsMocks.existsSync);
-    } else {
-      // Boolean: true for events.jsonl (detection), use value for target path
-      jest.spyOn(fs, 'existsSync').mockImplementation((p) => {
-        if (String(p).endsWith('events.jsonl')) return true;
-        return fsMocks.existsSync;
-      });
-    }
-  } else {
-    // Default: events.jsonl exists, target path doesn't
-    jest.spyOn(fs, 'existsSync').mockImplementation((p) => String(p).endsWith('events.jsonl'));
-  }
-
-  controller.importSession(req, res);
-  
-  // Wait for first spawn (list) to be called
-  await new Promise(resolve => setImmediate(resolve));
-  
-  // Simulate successful list operation
-  if (listCloseHandler) {
-    await listCloseHandler(0); // Exit code 0 = success
-  }
-  
-  // Wait for second spawn (extract) to be called
-  await new Promise(resolve => setImmediate(resolve));
-  
-  return { res, closeHandler: extractCloseHandler, errorHandler: extractErrorHandler, listCloseHandler, listErrorHandler };
+  return app;
 }
 
 describe('UploadController', () => {
+  const artifactRoot = path.join(__dirname, '.artifacts', 'upload-controller');
+  const validSessionId = '11111111-1111-4111-8111-111111111111';
   let controller;
-  let tmpSessionDir;
-  let consoleErrorSpy;
 
   beforeEach(async () => {
-    // Reset mocks first (before creating new spies)
-    jest.clearAllMocks();
-    jest.restoreAllMocks();
-    
-    // Mock console.error to avoid test failures from expected error logs
-    consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
-    
-    // Create temporary session directory
-    tmpSessionDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'upload-test-'));
-    process.env.SESSION_DIR = tmpSessionDir;
-    process.env.UPLOAD_DIR = path.join(tmpSessionDir, 'uploads');
-
+    await fs.promises.rm(artifactRoot, { recursive: true, force: true });
+    await fs.promises.mkdir(artifactRoot, { recursive: true });
+    process.env.UPLOAD_DIR = path.join(artifactRoot, 'uploads');
+    process.env.SESSION_DIR = path.join(artifactRoot, 'sessions');
     controller = new UploadController();
-
-    // Ensure upload directory exists and is clean
     await fs.promises.mkdir(controller.uploadDir, { recursive: true });
-
-    // Mock processManager
-    processManager.register.mockImplementation(() => {});
+    jest.spyOn(console, 'error').mockImplementation(() => {});
   });
 
   afterEach(async () => {
-    // Restore console.error
-    if (consoleErrorSpy) {
-      consoleErrorSpy.mockRestore();
-    }
-    // Cleanup - tmpSessionDir includes uploads subdir, so one rm suffices
-    await fs.promises.rm(tmpSessionDir, { recursive: true, force: true }).catch(() => {});
-    delete process.env.SESSION_DIR;
     delete process.env.UPLOAD_DIR;
+    delete process.env.SESSION_DIR;
+    jest.restoreAllMocks();
+    await fs.promises.rm(artifactRoot, { recursive: true, force: true });
   });
+
+  function writeZip(name, entries) {
+    const zip = new AdmZip();
+    for (const [entryName, data] of entries) {
+      zip.addFile(entryName, Buffer.from(data));
+    }
+    const zipPath = path.join(artifactRoot, name);
+    zip.writeZip(zipPath);
+    return zipPath;
+  }
+
+  async function importZip(zipPath, overrides = {}) {
+    const req = {
+      file: { path: zipPath, originalname: path.basename(zipPath) },
+      query: {},
+      logger: { info: jest.fn(), error: jest.fn() },
+      correlationId: 'upload-test',
+      ...overrides
+    };
+    const res = createResponse();
+    await controller.importSession(req, res);
+    return { req, res };
+  }
 
   describe('constructor and initialization', () => {
     it('should initialize with correct directories', () => {
-      expect(controller.SESSION_DIR).toBe(tmpSessionDir);
+      expect(controller.SESSION_DIR).toBe(process.env.SESSION_DIR);
       expect(controller.uploadDir).toBe(process.env.UPLOAD_DIR);
     });
 
-    it('should create multer instance with correct configuration', () => {
+    it('should create multer and asynchronous ZIP extraction services', () => {
       expect(controller.upload).toBeDefined();
-      expect(typeof controller.getUploadMiddleware).toBe('function');
+      expect(controller.zipExtractionService).toBeDefined();
+      expect(typeof controller.getUploadMiddleware()).toBe('function');
     });
   });
 
-  describe('fileFilter', () => {
-    it('should accept valid zip files', (done) => {
-      const req = {};
-      const file = {
-        originalname: 'session.zip',
-        mimetype: 'application/zip'
-      };
+  describe('multipart file filtering', () => {
+    it.each([
+      ['application/zip', 'session.zip', 'zipFile'],
+      ['application/x-zip-compressed', 'session.zip', 'zipFile'],
+      ['application/zip', 'session.ZIP', 'zipFile'],
+      ['application/zip', 'legacy.zip', 'sessionZip']
+    ])('accepts %s uploads named %s in the %s field', async (mimetype, filename, field) => {
+      const response = await request(createUploadApp(controller))
+        .post('/upload')
+        .attach(field, Buffer.from('zip fixture'), { filename, contentType: mimetype })
+        .expect(200);
 
-      const cb = (err, accept) => {
-        expect(err).toBeNull();
-        expect(accept).toBe(true);
-        done();
-      };
-
-      // Access fileFilter from the multer storage options
-      const storage = controller.upload.storage;
-      if (storage && storage.fileFilter) {
-        storage.fileFilter(req, file, cb);
-      } else {
-        // For multer with default storage, access via options
-        const fileFilterFn = (req, file, callback) => {
-          const isZipExtension = file.originalname.toLowerCase().endsWith('.zip');
-          const isZipMime = file.mimetype === 'application/zip' ||
-                            file.mimetype === 'application/x-zip-compressed';
-
-          if (!isZipExtension || !isZipMime) {
-            return callback(new Error('Only .zip files are allowed'));
-          }
-          callback(null, true);
-        };
-        fileFilterFn(req, file, cb);
-      }
+      expect(response.body).toEqual({
+        fieldname: field,
+        filename,
+        mimetype
+      });
     });
 
-    it('should accept zip files with x-zip-compressed mimetype', (done) => {
-      const req = {};
-      const file = {
-        originalname: 'session.zip',
-        mimetype: 'application/x-zip-compressed'
-      };
+    it.each([
+      ['application/zip', 'session.tar.gz'],
+      ['application/pdf', 'session.zip'],
+      ['application/x-executable', 'malicious.zip'],
+      ['application/zip', 'file.txt']
+    ])('rejects %s uploads named %s', async (mimetype, filename) => {
+      const response = await request(createUploadApp(controller))
+        .post('/upload')
+        .attach('zipFile', Buffer.from('not accepted'), { filename, contentType: mimetype })
+        .expect(400);
 
-      const cb = (err, accept) => {
-        expect(err).toBeNull();
-        expect(accept).toBe(true);
-        done();
-      };
-
-      const fileFilterFn = (req, file, callback) => {
-        const isZipExtension = file.originalname.toLowerCase().endsWith('.zip');
-        const isZipMime = file.mimetype === 'application/zip' ||
-                          file.mimetype === 'application/x-zip-compressed';
-
-        if (!isZipExtension || !isZipMime) {
-          return callback(new Error('Only .zip files are allowed'));
-        }
-        callback(null, true);
-      };
-      fileFilterFn(req, file, cb);
-    });
-
-    it('should accept uppercase .ZIP extension', (done) => {
-      const req = {};
-      const file = {
-        originalname: 'session.ZIP',
-        mimetype: 'application/zip'
-      };
-
-      const cb = (err, accept) => {
-        expect(err).toBeNull();
-        expect(accept).toBe(true);
-        done();
-      };
-
-      const fileFilterFn = (req, file, callback) => {
-        const isZipExtension = file.originalname.toLowerCase().endsWith('.zip');
-        const isZipMime = file.mimetype === 'application/zip' ||
-                          file.mimetype === 'application/x-zip-compressed';
-
-        if (!isZipExtension || !isZipMime) {
-          return callback(new Error('Only .zip files are allowed'));
-        }
-        callback(null, true);
-      };
-      fileFilterFn(req, file, cb);
-    });
-
-    it('should reject non-zip file extensions', (done) => {
-      const req = {};
-      const file = {
-        originalname: 'session.tar.gz',
-        mimetype: 'application/zip'
-      };
-
-      const cb = (err) => {
-        expect(err).toBeInstanceOf(Error);
-        expect(err.message).toBe('Only .zip files are allowed');
-        done();
-      };
-
-      const fileFilterFn = (req, file, callback) => {
-        const isZipExtension = file.originalname.toLowerCase().endsWith('.zip');
-        const isZipMime = file.mimetype === 'application/zip' ||
-                          file.mimetype === 'application/x-zip-compressed';
-
-        if (!isZipExtension || !isZipMime) {
-          return callback(new Error('Only .zip files are allowed'));
-        }
-        callback(null, true);
-      };
-      fileFilterFn(req, file, cb);
-    });
-
-    it('should reject non-zip mimetypes', (done) => {
-      const req = {};
-      const file = {
-        originalname: 'session.zip',
-        mimetype: 'application/pdf'
-      };
-
-      const cb = (err) => {
-        expect(err).toBeInstanceOf(Error);
-        expect(err.message).toBe('Only .zip files are allowed');
-        done();
-      };
-
-      const fileFilterFn = (req, file, callback) => {
-        const isZipExtension = file.originalname.toLowerCase().endsWith('.zip');
-        const isZipMime = file.mimetype === 'application/zip' ||
-                          file.mimetype === 'application/x-zip-compressed';
-
-        if (!isZipExtension || !isZipMime) {
-          return callback(new Error('Only .zip files are allowed'));
-        }
-        callback(null, true);
-      };
-      fileFilterFn(req, file, cb);
-    });
-
-    it('should reject files with zip extension but wrong mimetype', (done) => {
-      const req = {};
-      const file = {
-        originalname: 'malicious.zip',
-        mimetype: 'application/x-executable'
-      };
-
-      const cb = (err) => {
-        expect(err).toBeInstanceOf(Error);
-        expect(err.message).toBe('Only .zip files are allowed');
-        done();
-      };
-
-      const fileFilterFn = (req, file, callback) => {
-        const isZipExtension = file.originalname.toLowerCase().endsWith('.zip');
-        const isZipMime = file.mimetype === 'application/zip' ||
-                          file.mimetype === 'application/x-zip-compressed';
-
-        if (!isZipExtension || !isZipMime) {
-          return callback(new Error('Only .zip files are allowed'));
-        }
-        callback(null, true);
-      };
-      fileFilterFn(req, file, cb);
-    });
-
-    it('should reject files with correct mimetype but wrong extension', (done) => {
-      const req = {};
-      const file = {
-        originalname: 'file.txt',
-        mimetype: 'application/zip'
-      };
-
-      const cb = (err) => {
-        expect(err).toBeInstanceOf(Error);
-        expect(err.message).toBe('Only .zip files are allowed');
-        done();
-      };
-
-      const fileFilterFn = (req, file, callback) => {
-        const isZipExtension = file.originalname.toLowerCase().endsWith('.zip');
-        const isZipMime = file.mimetype === 'application/zip' ||
-                          file.mimetype === 'application/x-zip-compressed';
-
-        if (!isZipExtension || !isZipMime) {
-          return callback(new Error('Only .zip files are allowed'));
-        }
-        callback(null, true);
-      };
-      fileFilterFn(req, file, cb);
+      expect(response.body).toEqual({ error: 'Only .zip files are allowed' });
     });
   });
 
+  describe('asynchronous archive validation and extraction', () => {
+    it('extracts through a worker without blocking the server event loop', async () => {
+      const zipPath = writeZip('worker.zip', [
+        [`${validSessionId}/events.jsonl`, '{"type":"user.message"}\n']
+      ]);
+      const extractDir = path.join(artifactRoot, 'worker-extract');
+      let settled = false;
+      const extraction = controller._extractZipArchive(zipPath, extractDir)
+        .then(result => {
+          settled = true;
+          return result;
+        });
+
+      await new Promise(resolve => setImmediate(resolve));
+      expect(settled).toBe(false);
+      await expect(extraction).resolves.toEqual(expect.objectContaining({
+        entries: 1
+      }));
+      await expect(fs.promises.readFile(
+        path.join(extractDir, validSessionId, 'events.jsonl'),
+        'utf8'
+      )).resolves.toContain('user.message');
+    });
+
+    it('rejects unreadable archives', async () => {
+      const zipPath = path.join(artifactRoot, 'invalid.zip');
+      await fs.promises.writeFile(zipPath, 'not a zip');
+      await expect(controller._validateZipArchive(zipPath))
+        .rejects.toThrow('Failed to read zip contents');
+    });
+
+    it('rejects compressed uploads larger than the archive limit before parsing', async () => {
+      const zipPath = path.join(artifactRoot, 'oversized.zip');
+      await fs.promises.writeFile(zipPath, Buffer.alloc(1));
+      await fs.promises.truncate(zipPath, (50 * 1024 * 1024) + 1);
+      await expect(controller._validateZipArchive(zipPath))
+        .rejects.toThrow('Compressed file too large');
+    });
+
+    it('rejects archive traversal paths', () => {
+      expect(() => inspectEntry({
+        entryName: '../outside.txt',
+        attr: 0,
+        header: { size: 1 }
+      })).toThrow('Invalid archive path');
+    });
+
+    it('rejects absolute Windows archive paths', () => {
+      expect(() => inspectEntry({
+        entryName: 'C:/outside.txt',
+        attr: 0,
+        header: { size: 1 }
+      })).toThrow('Invalid archive path');
+    });
+
+    it('rejects Windows alternate-data-stream archive paths', () => {
+      expect(() => inspectEntry({
+        entryName: 'session/events.jsonl:hidden',
+        attr: 0,
+        header: { size: 1 }
+      })).toThrow('Invalid archive path');
+    });
+
+    it('rejects symbolic links', () => {
+      expect(() => inspectEntry({
+        entryName: 'session/link',
+        attr: 0xA000 << 16,
+        header: { size: 1 }
+      })).toThrow('Symbolic links are not allowed');
+    });
+
+    it('rejects excessive directory nesting', async () => {
+      const zipPath = writeZip('deep.zip', [
+        ['one/two/three/four/five/six/file.txt', 'too deep']
+      ]);
+      await expect(controller._validateZipArchive(zipPath))
+        .rejects.toThrow('Directory nesting too deep');
+    });
+
+    it('enforces uncompressed-size limits from archive metadata', () => {
+      const zipPath = writeZip('large.zip', [['session/events.jsonl', 'large']]);
+      expect(() => openAndValidateArchive(zipPath, { maxUncompressedBytes: 1 }))
+        .toThrow('Uncompressed size too large');
+    });
+
+    it('enforces archive entry-count limits', () => {
+      const zipPath = writeZip('many.zip', [
+        ['one.txt', '1'],
+        ['two.txt', '2']
+      ]);
+      expect(() => openAndValidateArchive(zipPath, { maxFiles: 1 }))
+        .toThrow('Too many files in archive');
+    });
+  });
 
   describe('importSession', () => {
-    it('should reject request with no file', async () => {
-      const req = { file: null };
-      const res = {
-        status: jest.fn().mockReturnThis(),
-        json: jest.fn()
-      };
-
-      await controller.importSession(req, res);
-
-      expect(res.status).toHaveBeenCalledWith(400);
-      expect(res.json).toHaveBeenCalledWith({ error: 'No file uploaded' });
+    it('should reject a request with no file', async () => {
+      const res = createResponse();
+      await controller.importSession({ file: null }, res);
+      expect(res.statusCode).toBe(400);
+      expect(res.body).toEqual({ error: 'No file uploaded' });
     });
 
-    it('should successfully import valid session', async () => {
-      const sessionId = 'imported-session-id';
-      const zipPath = path.join(controller.uploadDir, 'test.zip');
-      // Ensure directory exists (defense against CI race conditions)
-      await fs.promises.mkdir(path.dirname(zipPath), { recursive: true });
-      await fs.promises.writeFile(zipPath, 'dummy zip content');
-
-      const req = {
-        file: {
-          path: zipPath,
-          originalname: 'session.zip'
-        }
-      };
-
-      const { res, closeHandler } = await setupImportSessionTest(controller, req, {
-        readdir: [sessionId],
-        access: jest.fn().mockResolvedValue(),
-        existsSync: false,
-        rename: jest.fn().mockResolvedValue()
-      });
-
-      if (closeHandler) {
-        await closeHandler(0);
-      }
-
-      const response = await res.responsePromise;
-
-      expect(spawn).toHaveBeenCalledWith(
-        'unzip',
-        expect.arrayContaining(['-q'])
-      );
-      expect(response.body).toEqual({
+    it('should successfully import a valid session and clean temporary data', async () => {
+      const zipPath = writeZip('session.zip', [
+        [`${validSessionId}/events.jsonl`, '{"type":"user.message"}\n']
+      ]);
+      jest.spyOn(controller, '_importExtractedSession').mockResolvedValue({
         success: true,
-        sessionId,
+        sessionId: validSessionId,
         format: 'copilot'
       });
-    });
 
-    it('should handle unzip failure', async () => {
-      const zipPath = path.join(controller.uploadDir, 'test.zip');
-      // Ensure directory exists (defense against CI race conditions)
-      await fs.promises.mkdir(path.dirname(zipPath), { recursive: true });
-      await fs.promises.writeFile(zipPath, 'dummy');
+      const { req, res } = await importZip(zipPath);
 
-      const req = { file: { path: zipPath } };
-      const res = createAsyncRes();
-
-      let listCloseHandler, extractCloseHandler;
-      let spawnCallCount = 0;
-      
-      // Mock process for `unzip -l` (list contents - first call)
-      const mockListProcess = {
-        on: jest.fn((event, handler) => {
-          if (event === 'close') listCloseHandler = handler;
-          return mockListProcess;
-        }),
-        stdout: {
-          on: jest.fn((event, handler) => {
-            if (event === 'data') {
-              // Simulate unzip -l output
-              const mockOutput = `Archive:  test.zip
-  Length      Date    Time    Name
----------  ---------- -----   ----
-     1024  2024-02-23 12:00   test-session/events.jsonl
----------                     -------
-     1024                     1 files\n`;
-              handler(Buffer.from(mockOutput));
-            }
-            return mockListProcess.stdout;
-          })
-        }
-      };
-      
-      // Mock process for `unzip -q` (extract - second call, will fail)
-      const mockExtractProcess = {
-        on: jest.fn((event, handler) => {
-          if (event === 'close') extractCloseHandler = handler;
-          return mockExtractProcess;
-        })
-      };
-      
-      spawn.mockImplementation((cmd, args) => {
-        spawnCallCount++;
-        if (spawnCallCount === 1 && args && args[0] === '-l') {
-          return mockListProcess;
-        } else {
-          return mockExtractProcess;
-        }
+      expect(res.statusCode).toBe(200);
+      expect(res.body).toEqual({
+        success: true,
+        sessionId: validSessionId,
+        format: 'copilot'
       });
-
-      // Mock ALL fs operations used in importSession
-      jest.spyOn(fs.promises, 'mkdir').mockResolvedValue();
-      jest.spyOn(fs.promises, 'stat').mockResolvedValue({ size: 1000, isDirectory: () => true, isFile: () => false });
-      jest.spyOn(fs.promises, 'unlink').mockResolvedValue();
-      jest.spyOn(fs.promises, 'rm').mockResolvedValue();
-
-      controller.importSession(req, res);
-
-      // Wait for first spawn (list) to be called and simulate success
-      await new Promise(resolve => setImmediate(resolve));
-      if (listCloseHandler) {
-        await listCloseHandler(0); // List succeeds
-      }
-      
-      // Wait for second spawn (extract) to be called
-      await new Promise(resolve => setImmediate(resolve));
-      
-      // Simulate extract failure
-      if (extractCloseHandler) {
-        await extractCloseHandler(1); // Extract fails
-      }
-
-      // Wait for response
-      const response = await res.responsePromise;
-
-      expect(response.status).toBe(500);
-      expect(response.body).toEqual({ error: 'Failed to extract zip file' });
+      expect(req.logger.info).toHaveBeenCalledWith('import.completed', expect.objectContaining({
+        correlationId: 'upload-test',
+        format: 'copilot'
+      }));
+      await expect(fs.promises.access(zipPath)).rejects.toMatchObject({ code: 'ENOENT' });
     });
 
-    it('should reject empty zip files', async () => {
-      const zipPath = path.join(controller.uploadDir, 'test.zip');
-      // Ensure directory exists (defense against CI race conditions)
-      await fs.promises.mkdir(path.dirname(zipPath), { recursive: true });
-      await fs.promises.writeFile(zipPath, 'dummy');
+    it('should reject empty ZIP files', async () => {
+      const zipPath = writeZip('empty.zip', []);
+      const { res } = await importZip(zipPath);
+      expect(res.statusCode).toBe(400);
+      expect(res.body).toEqual(expect.objectContaining({ error: 'Empty zip file' }));
+    });
 
-      const req = { file: { path: zipPath } };
-      const { res, closeHandler } = await setupImportSessionTest(controller, req, {
-        readdir: []  // Empty directory
+    it('should reject unsupported session formats', async () => {
+      const zipPath = writeZip('unsupported.zip', [['unknown/readme.txt', 'unknown']]);
+      const { res } = await importZip(zipPath);
+      expect(res.statusCode).toBe(415);
+      expect(res.body).toEqual(expect.objectContaining({
+        error: 'Unsupported session zip format',
+        code: 'unsupported-format'
+      }));
+    });
+
+    it('should preserve adapter conflict responses', async () => {
+      const zipPath = writeZip('existing.zip', [['session/file.txt', 'fixture']]);
+      jest.spyOn(controller, '_importExtractedSession').mockResolvedValue({
+        success: false,
+        statusCode: 409,
+        error: 'Session already exists'
       });
-
-      if (closeHandler) {
-        await closeHandler(0);
-      }
-
-      const response = await res.responsePromise;
-      expect(response.status).toBe(400);
-      expect(response.body).toEqual(expect.objectContaining({ error: 'Empty zip file' }));
+      const { res } = await importZip(zipPath);
+      expect(res.statusCode).toBe(409);
+      expect(res.body).toEqual({ error: 'Session already exists' });
     });
 
-    it('should reject invalid session directory names', async () => {
-      const zipPath = path.join(controller.uploadDir, 'test.zip');
-      // Ensure directory exists (defense against CI race conditions)
-      await fs.promises.mkdir(path.dirname(zipPath), { recursive: true });
-      await fs.promises.writeFile(zipPath, 'dummy');
-
-      const req = { file: { path: zipPath } };
-      const { res, closeHandler } = await setupImportSessionTest(controller, req, {
-        readdir: ['../../../etc/passwd']
+    it('should surface ambiguous-format details', async () => {
+      const zipPath = writeZip('ambiguous.zip', [['session/file.txt', 'fixture']]);
+      jest.spyOn(controller, '_importExtractedSession').mockResolvedValue({
+        success: false,
+        statusCode: 400,
+        error: 'Ambiguous session zip format',
+        code: 'ambiguous-format',
+        candidates: [{ source: 'copilot' }, { source: 'claude' }]
       });
-
-      if (closeHandler) {
-        await closeHandler(0);
-      }
-
-      const response = await res.responsePromise;
-      expect(response.status).toBe(400);
-      expect(response.body).toEqual(expect.objectContaining({ error: 'Invalid session directory name in zip file' }));
+      const { res } = await importZip(zipPath);
+      expect(res.statusCode).toBe(400);
+      expect(res.body).toEqual(expect.objectContaining({
+        code: 'ambiguous-format',
+        candidates: expect.any(Array)
+      }));
     });
 
-    it('should reject sessions without events.jsonl', async () => {
-      const sessionId = 'test-session-id';
-      const zipPath = path.join(controller.uploadDir, 'test.zip');
-      // Ensure directory exists (defense against CI race conditions)
-      await fs.promises.mkdir(path.dirname(zipPath), { recursive: true });
-      await fs.promises.writeFile(zipPath, 'dummy');
+    it('should return validation failures as client errors and remove the upload', async () => {
+      const zipPath = path.join(artifactRoot, 'invalid-upload.zip');
+      await fs.promises.writeFile(zipPath, 'not a zip');
+      const { res } = await importZip(zipPath);
+      expect(res.statusCode).toBe(400);
+      expect(res.body.error).toMatch(/Failed to read zip/);
+      await expect(fs.promises.access(zipPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    });
 
-      const req = { file: { path: zipPath } };
-      const { res, closeHandler } = await setupImportSessionTest(controller, req, {
-        readdir: [sessionId],
-        existsSync: () => false  // events.jsonl not found → detection fails
+    it('should contain worker failures and clean uploaded files', async () => {
+      const zipPath = writeZip('worker-failure.zip', [['session/file.txt', 'fixture']]);
+      jest.spyOn(controller.zipExtractionService, 'extract')
+        .mockRejectedValue(new Error('worker unavailable'));
+      const { req, res } = await importZip(zipPath);
+      expect(res.statusCode).toBe(500);
+      expect(res.body).toEqual({ error: 'Error processing upload' });
+      expect(req.logger.error).toHaveBeenCalledWith('import.failed', expect.any(Object));
+      await expect(fs.promises.access(zipPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    });
+
+    it('should ignore cleanup failures after a successful import', async () => {
+      const zipPath = writeZip('cleanup.zip', [['session/file.txt', 'fixture']]);
+      jest.spyOn(controller.zipExtractionService, 'extract').mockResolvedValue({
+        entries: 1,
+        extractedBytes: 7
       });
-
-      if (closeHandler) {
-        await closeHandler(0);
-      }
-
-      const response = await res.responsePromise;
-      expect(response.status).toBe(415);
-      expect(response.body).toEqual(expect.objectContaining({ error: 'Unsupported session zip format' }));
-    });
-
-    it('should reject session that already exists', async () => {
-      const sessionId = 'existing-session-id';
-      const zipPath = path.join(controller.uploadDir, 'test.zip');
-      await fs.promises.writeFile(zipPath, 'dummy');
-
-      const req = { file: { path: zipPath } };
-      const { res, closeHandler } = await setupImportSessionTest(controller, req, {
-        readdir: [sessionId],
-        access: jest.fn().mockResolvedValue(),
-        existsSync: true
+      jest.spyOn(controller, '_importExtractedSession').mockResolvedValue({
+        success: true,
+        sessionId: validSessionId,
+        format: 'copilot'
       });
+      jest.spyOn(fs.promises, 'unlink').mockRejectedValue(new Error('unlink failed'));
+      jest.spyOn(fs.promises, 'rm').mockRejectedValue(new Error('rm failed'));
 
-      if (closeHandler) {
-        await closeHandler(0);
-      }
+      const { res } = await importZip(zipPath);
 
-      const response = await res.responsePromise;
-      expect(response.status).toBe(409);
-      expect(response.body).toEqual({ error: 'Session already exists' });
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
     });
 
-    it('should handle unzip spawn error', async () => {
-      const zipPath = path.join(controller.uploadDir, 'test.zip');
-      // Ensure directory exists (defense against CI race conditions)
-      await fs.promises.mkdir(path.dirname(zipPath), { recursive: true });
-      await fs.promises.writeFile(zipPath, 'dummy');
-
-      const req = { file: { path: zipPath } };
-      const { res, errorHandler } = await setupImportSessionTest(controller, req, {});
-
-      if (errorHandler) {
-        await errorHandler(new Error('Unzip failed'));
-      }
-
-      const response = await res.responsePromise;
-      expect(response.status).toBe(500);
-      expect(response.body).toEqual({ error: 'Failed to extract zip file' });
-    });
-
-    it('should handle unzip spawn error with cleanup failures', async () => {
-      const zipPath = path.join(controller.uploadDir, 'test.zip');
-      // Ensure directory exists (defense against CI race conditions)
-      await fs.promises.mkdir(path.dirname(zipPath), { recursive: true });
-      await fs.promises.writeFile(zipPath, 'dummy');
-
-      const req = { file: { path: zipPath } };
-      
-      // Mock cleanup to fail (should be caught and ignored)
-      const unlinkSpy = jest.spyOn(fs.promises, 'unlink').mockRejectedValue(new Error('Unlink failed'));
-      const rmSpy = jest.spyOn(fs.promises, 'rm').mockRejectedValue(new Error('Rm failed'));
-
-      const { res, errorHandler } = await setupImportSessionTest(controller, req, {});
-
-      if (errorHandler) {
-        await errorHandler(new Error('Unzip failed'));
-      }
-
-      const response = await res.responsePromise;
-
-      unlinkSpy.mockRestore();
-      rmSpy.mockRestore();
-
-      expect(response.status).toBe(500);
-      expect(response.body).toEqual({ error: 'Failed to extract zip file' });
-    });
-
-    it('should handle error handler when zipPath unlink succeeds but extractDir rm fails', async () => {
-      const zipPath = path.join(controller.uploadDir, 'test.zip');
-      // Ensure directory exists (defense against CI race conditions)
-      await fs.promises.mkdir(path.dirname(zipPath), { recursive: true });
-      await fs.promises.writeFile(zipPath, 'dummy');
-
-      const req = { file: { path: zipPath } };
-      
-      // Mock rm to fail
-      const rmSpy = jest.spyOn(fs.promises, 'rm').mockRejectedValue(new Error('Rm failed'));
-
-      const { res, errorHandler } = await setupImportSessionTest(controller, req, {});
-
-      if (errorHandler) {
-        await errorHandler(new Error('Unzip failed'));
-      }
-
-      const response = await res.responsePromise;
-
-      rmSpy.mockRestore();
-
-      expect(response.status).toBe(500);
-      expect(response.body).toEqual({ error: 'Failed to extract zip file' });
-    });
-
-    it('should handle unexpected errors and cleanup file', async () => {
-      const zipPath = path.join(controller.uploadDir, 'test.zip');
-      
-      // Use real fs to avoid issues with previous mocks
-      const realFs = jest.requireActual('fs');
-      if (!realFs.existsSync(controller.uploadDir)) {
-        await realFs.promises.mkdir(controller.uploadDir, { recursive: true });
-      }
-      await realFs.promises.writeFile(zipPath, 'dummy');
-
-      const req = { file: { path: zipPath } };
-      const res = {
-        status: jest.fn().mockReturnThis(),
-        json: jest.fn()
-      };
-
-      // Mock spawn to throw
-      spawn.mockImplementation(() => {
-        throw new Error('Unexpected error');
-      });
-
-      await controller.importSession(req, res);
-
-      expect(res.status).toHaveBeenCalledWith(500);
-      expect(res.json).toHaveBeenCalledWith({ error: 'Error processing upload' });
-
-      // Verify file was cleaned up
-      expect(realFs.existsSync(zipPath)).toBe(false);
-    });
-
-    it('should handle errors during unlink in close handler', async () => {
-      const zipPath = path.join(controller.uploadDir, 'test.zip');
-      // Ensure directory exists (defense against CI race conditions)
-      await fs.promises.mkdir(path.dirname(zipPath), { recursive: true });
-      await fs.promises.writeFile(zipPath, 'dummy');
-
-      const req = { file: { path: zipPath } };
-      
-      // Mock unlink to fail
-      const unlinkSpy = jest.spyOn(fs.promises, 'unlink').mockRejectedValue(new Error('Unlink failed'));
-
-      const { res, closeHandler } = await setupImportSessionTest(controller, req, {});
-
-      if (closeHandler) {
-        await closeHandler(1);
-      }
-
-      const response = await res.responsePromise;
-
-      unlinkSpy.mockRestore();
-
-      expect(response.status).toBe(500);
-      expect(response.body).toEqual({ error: 'Failed to extract zip file' });
-    });
-
-    it('should handle errors during readdir in close handler', async () => {
-      const zipPath = path.join(controller.uploadDir, 'test.zip');
-      // Ensure directory exists (defense against CI race conditions)
-      await fs.promises.mkdir(path.dirname(zipPath), { recursive: true });
-      await fs.promises.writeFile(zipPath, 'dummy');
-
-      const req = { file: { path: zipPath } };
-      
-      // Mock readdir to throw
-      const readdirSpy = jest.spyOn(fs.promises, 'readdir').mockRejectedValue(new Error('Readdir failed'));
-
-      const { res, closeHandler } = await setupImportSessionTest(controller, req, {});
-
-      if (closeHandler) {
-        await closeHandler(0);
-      }
-
-      const response = await res.responsePromise;
-
-      readdirSpy.mockRestore();
-
-      expect(response.status).toBe(500);
-      expect(response.body).toEqual({ error: 'Error importing session' });
-    });
-
-    it('should return unsupported-format when no adapter recognizes the zip', async () => {
-      const sessionId = 'test-session-id';
-      const zipPath = path.join(controller.uploadDir, 'test.zip');
-      await fs.promises.mkdir(path.dirname(zipPath), { recursive: true });
-      await fs.promises.writeFile(zipPath, 'dummy');
-
-      const req = { file: { path: zipPath } };
-      const { res, closeHandler } = await setupImportSessionTest(controller, req, {
-        readdir: [sessionId],
-        existsSync: () => false  // no events.jsonl → no adapter matches
-      });
-
-      if (closeHandler) {
-        await closeHandler(0);
-      }
-
-      const response = await res.responsePromise;
-      expect(response.status).toBe(415);
-      expect(response.body).toEqual(expect.objectContaining({ error: 'Unsupported session zip format' }));
-    });
-
-    it('should handle errors during rename in close handler', async () => {
-      const sessionId = 'test-session-id';
-      const zipPath = path.join(controller.uploadDir, 'test.zip');
-      
-      // Ensure directory exists before writing file (use real fs, not mocked)
-      const realFs = jest.requireActual('fs');
-      if (!realFs.existsSync(controller.uploadDir)) {
-        await realFs.promises.mkdir(controller.uploadDir, { recursive: true });
-      }
-      await realFs.promises.writeFile(zipPath, 'dummy');
-
-      const req = { file: { path: zipPath } };
-      
-      // Mock rename to fail
-      const renameSpy = jest.spyOn(fs.promises, 'rename').mockRejectedValue(new Error('Rename failed'));
-
-      const { res, closeHandler } = await setupImportSessionTest(controller, req, {
-        readdir: [sessionId],
-        access: jest.fn().mockResolvedValue(),
-        existsSync: false
-      });
-
-      if (closeHandler) {
-        await closeHandler(0);
-      }
-
-      const response = await res.responsePromise;
-
-      renameSpy.mockRestore();
-
-      expect(response.status).toBe(500);
-      expect(response.body).toEqual({ error: 'Error importing session' });
-    });
-
-    it('should handle cleanup errors gracefully in close handler catch block', async () => {
-      const sessionId = 'test-session-id';
-      const zipPath = path.join(controller.uploadDir, 'test.zip');
-      const realFs = jest.requireActual('fs');
-      if (!realFs.existsSync(controller.uploadDir)) {
-        await realFs.promises.mkdir(controller.uploadDir, { recursive: true });
-      }
-      await realFs.promises.writeFile(zipPath, 'dummy');
-
-      const req = { file: { path: zipPath } };
-      const rmSpy = jest.spyOn(fs.promises, 'rm').mockRejectedValue(new Error('Cleanup failed'));
-
-      const { res, closeHandler } = await setupImportSessionTest(controller, req, {
-        readdir: [sessionId],
-        existsSync: () => false  // no adapter matches
-      });
-
-      if (closeHandler) {
-        await closeHandler(0);
-      }
-
-      const response = await res.responsePromise;
-      rmSpy.mockRestore();
-
-      // Even with cleanup failure, the response should still indicate unsupported format
-      expect(response.status).toBe(415);
-      expect(response.body).toEqual(expect.objectContaining({ error: 'Unsupported session zip format' }));
+    it('should contain unexpected detection errors', async () => {
+      const zipPath = writeZip('detection-error.zip', [['session/file.txt', 'fixture']]);
+      jest.spyOn(controller, '_importExtractedSession')
+        .mockRejectedValue(new Error('detection failed'));
+      const { res } = await importZip(zipPath);
+      expect(res.statusCode).toBe(500);
+      expect(res.body).toEqual({ error: 'Error processing upload' });
     });
   });
 
-  describe('getUploadMiddleware', () => {
-    it('should return multer middleware function', () => {
-      const middleware = controller.getUploadMiddleware();
-      expect(typeof middleware).toBe('function');
+  describe('format dispatch', () => {
+    it('rejects invalid detected session IDs', async () => {
+      await expect(controller._importByFormat({
+        format: 'copilot',
+        sessionId: '../invalid'
+      }, artifactRoot, { query: {} })).resolves.toEqual({
+        success: false,
+        error: 'Invalid session ID',
+        statusCode: 400
+      });
+    });
+
+    it('rejects unsupported detected formats', async () => {
+      await expect(controller._importByFormat({
+        format: 'unknown',
+        sessionId: validSessionId
+      }, artifactRoot, { query: {} })).resolves.toEqual(expect.objectContaining({
+        success: false,
+        code: 'unsupported-format',
+        statusCode: 400
+      }));
+    });
+
+    it('should return multer middleware functions for every request', () => {
+      expect(typeof controller.getUploadMiddleware()).toBe('function');
+      expect(typeof controller.getUploadMiddleware()).toBe('function');
     });
   });
 });

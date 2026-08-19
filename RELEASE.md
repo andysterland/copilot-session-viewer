@@ -90,6 +90,8 @@ graph LR
 
     Unsigned PR/nightly artifacts must be labeled as unsigned. They do not receive the production-release marker, so update checks remain disabled. Rotate certificates before expiration, update the relevant repository secrets, and validate signatures before publishing. If signing is unavailable, keep the release as a draft.
 
+    Local Windows MSI builds use `npm run electron:dist:msi`. The script permits WiX warnings so a system-policy-blocked ICE validation pass (`LGHT1105`) does not abort packaging. Production desktop releases continue to use the signed NSIS target.
+
     To halt a faulty release, mark it as draft or delete its updater metadata. Publish a higher patch version for rollback; the updater rejects downgrades. Do not replace files on a published version because clients verify signatures and checksums.
 
 ---

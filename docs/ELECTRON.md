@@ -163,9 +163,12 @@ npm run test:electron:e2e     # Playwright Electron tests with fixtures
 npm run electron:unpacked     # unpacked package for the current platform
 npm run electron:smoke        # launch packaged output and verify initial window
 npm run electron:dist:win
+npm run electron:dist:msi
 npm run electron:dist:mac
 npm run electron:dist:linux
 ```
+
+The MSI command allows WiX warnings because ICE validation can be blocked by Windows system policy for non-elevated processes (`LGHT1105`). It does not disable MSI creation or affect the signed NSIS release workflow. Use an unrestricted build host if MSI ICE validation is required for release compliance.
 
 Electron test runs use synthetic fixtures and isolated user data. Browser Playwright tests remain independent and do not require Electron globals.
 

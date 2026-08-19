@@ -62,6 +62,7 @@
     "electron:unpacked": "npm run electron:prepare && electron-builder --dir",
     "electron:dist": "npm run electron:prepare && electron-builder",
     "electron:dist:win": "npm run electron:prepare && electron-builder --win nsis",
+    "electron:dist:msi": "npm run electron:prepare && electron-builder --win msi --config.msi.warningsAsErrors=false",
     "electron:dist:mac": "npm run electron:prepare && electron-builder --mac dmg zip -c.mac.notarize=false",
     "electron:dist:mac:release": "npm run electron:prepare && electron-builder --mac dmg zip",
     "electron:dist:linux": "npm run electron:prepare && electron-builder --linux AppImage",

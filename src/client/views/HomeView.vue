@@ -123,6 +123,7 @@ import SessionCard from '../components/home/SessionCard.vue';
 import SummaryTooltip from '../components/home/SummaryTooltip.vue';
 import BottomSheet from '../components/home/BottomSheet.vue';
 import { toUrlSource } from '../utils/sourceMapping.js';
+import { isAbsolutePath } from '../utils/pathValidation.js';
 import { listDirs, registerDir, removeDir } from '../api/dirs.js';
 
 const router = useRouter();
@@ -198,9 +199,10 @@ const currentSourceHintDir = computed(() => {
 });
 
 async function addCustomDirectory() {
-  const dirInput = prompt('Enter absolute directory path (e.g. /home/user/sessions):');
-  if (!dirInput || (!dirInput.startsWith('/') && !dirInput.startsWith('~'))) {
-    if (dirInput) alert('Path must be absolute (start with / or ~)');
+  const dirInputRaw = prompt('Enter absolute directory path (e.g. /home/user/sessions or C:\\Users\\user\\sessions):');
+  const dirInput = typeof dirInputRaw === 'string' ? dirInputRaw.trim() : dirInputRaw;
+  if (!isAbsolutePath(dirInput)) {
+    if (dirInput) alert('Path must be absolute (for example /home/user/sessions or C:\\Users\\user\\sessions)');
     return;
   }
   const source = currentSourceFilter.value;

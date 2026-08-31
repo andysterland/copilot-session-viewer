@@ -28,7 +28,7 @@
     "node": ">=22.0.0"
   },
   "bin": {
-    "copilot-session-viewer": "./bin/copilot-session-viewer"
+    "copilot-session-viewer": "bin/copilot-session-viewer"
   },
   "scripts": {
     "build": "vite build && node scripts/build.mjs",

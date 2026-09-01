@@ -142,6 +142,8 @@ Stable users receive `latest`; prerelease users receive `beta`. Checks run after
 
 Every release should include updater metadata, platform `SHA256SUMS-*` files, third-party license data, and a CycloneDX SBOM. Signing/notarization credentials are provided only through GitHub Actions secrets.
 
+The release workflow uses signing and notarization credentials when they are configured. If credentials are absent or incomplete, it publishes unsigned artifacts and skips signature verification; macOS also skips notarization. Unsigned packages trigger operating-system trust warnings and must be identified as unsigned in release notes.
+
 ## Development
 
 ```bash

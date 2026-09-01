@@ -9,25 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  require-signing-credentials:
-    runs-on: ubuntu-latest
-    env:
-      WINDOWS_CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
-      WINDOWS_CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
-      MACOS_CSC_LINK: ${{ secrets.MACOS_CSC_LINK }}
-      MACOS_CSC_KEY_PASSWORD: ${{ secrets.MACOS_CSC_KEY_PASSWORD }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-    steps:
-      - name: Require production signing and notarization credentials
-        run: |
-          for name in WINDOWS_CSC_LINK WINDOWS_CSC_KEY_PASSWORD MACOS_CSC_LINK MACOS_CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
-            test -n "${!name}" || { echo "::error::$name is required for a public desktop release"; exit 1; }
-          done
-
   create-draft:
-    needs: require-signing-credentials
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -84,6 +66,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       ELECTRON_PRODUCTION_RELEASE: 'true'
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       CSC_LINK: ${{ matrix.os == 'windows-latest' && secrets.WINDOWS_CSC_LINK || matrix.os == 'macos-latest' && secrets.MACOS_CSC_LINK || '' }}
       CSC_KEY_PASSWORD: ${{ matrix.os == 'windows-latest' && secrets.WINDOWS_CSC_KEY_PASSWORD || matrix.os == 'macos-latest' && secrets.MACOS_CSC_KEY_PASSWORD || '' }}
       APPLE_ID: ${{ matrix.os == 'macos-latest' && secrets.APPLE_ID || '' }}
@@ -98,17 +81,31 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run test:electron
-      - run: npm run ${{ matrix.command }}
+      - name: Build signed or unsigned desktop distribution
+        shell: bash
+        run: |
+          if [[ "${{ matrix.os }}" == "macos-latest" ]] \
+            && { [[ -z "$CSC_LINK" ]] || [[ -z "$CSC_KEY_PASSWORD" ]] \
+              || [[ -z "$APPLE_ID" ]] || [[ -z "$APPLE_APP_SPECIFIC_PASSWORD" ]] \
+              || [[ -z "$APPLE_TEAM_ID" ]]; }; then
+            echo "::warning::macOS signing credentials are incomplete; building unsigned and without notarization"
+            npm run electron:dist:mac
+          else
+            if [[ -z "$CSC_LINK" ]] || [[ -z "$CSC_KEY_PASSWORD" ]]; then
+              echo "::warning::Code-signing credentials are not configured; building unsigned"
+            fi
+            npm run ${{ matrix.command }}
+          fi
       - run: npm run electron:checksums
       - name: Verify Windows signature
-        if: matrix.os == 'windows-latest'
+        if: matrix.os == 'windows-latest' && env.CSC_LINK != '' && env.CSC_KEY_PASSWORD != ''
         shell: pwsh
         run: |
           $exe = Get-ChildItem release/electron/win-unpacked/copilot-session-viewer.exe
           $signature = Get-AuthenticodeSignature $exe.FullName
           if ($signature.Status -ne 'Valid') { throw "Invalid Windows signature: $($signature.Status)" }
       - name: Verify Apple signature and notarization
-        if: matrix.os == 'macos-latest'
+        if: matrix.os == 'macos-latest' && env.CSC_LINK != '' && env.CSC_KEY_PASSWORD != '' && env.APPLE_ID != '' && env.APPLE_APP_SPECIFIC_PASSWORD != '' && env.APPLE_TEAM_ID != ''
         shell: bash
         run: |
           APP_PATH="$(find release/electron -maxdepth 2 -name 'Copilot Session Viewer.app' -print -quit)"

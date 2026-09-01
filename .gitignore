@@ -18,6 +18,7 @@ debug-*.js
 verify-*.js
 generate-*.js
 !electron/scripts/generate-licenses.js
+!electron/scripts/generate-checksums.js
 final-test.js
 
 # Temporary screenshots

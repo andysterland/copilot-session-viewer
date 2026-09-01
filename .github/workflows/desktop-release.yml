@@ -89,10 +89,12 @@ jobs:
               || [[ -z "$APPLE_ID" ]] || [[ -z "$APPLE_APP_SPECIFIC_PASSWORD" ]] \
               || [[ -z "$APPLE_TEAM_ID" ]]; }; then
             echo "::warning::macOS signing credentials are incomplete; building unsigned and without notarization"
+            unset CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
             npm run electron:dist:mac
           else
             if [[ -z "$CSC_LINK" ]] || [[ -z "$CSC_KEY_PASSWORD" ]]; then
               echo "::warning::Code-signing credentials are not configured; building unsigned"
+              unset CSC_LINK CSC_KEY_PASSWORD
             fi
             npm run ${{ matrix.command }}
           fi
@@ -125,7 +127,7 @@ jobs:
             fi
           )
           test "${#artifacts[@]}" -gt 0
-          gh release upload "$GITHUB_REF_NAME" "${artifacts[@]}"
+          gh release upload "$GITHUB_REF_NAME" "${artifacts[@]}" --clobber
 
   publish:
     runs-on: ubuntu-latest

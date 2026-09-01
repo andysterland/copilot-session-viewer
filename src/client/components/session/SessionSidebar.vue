@@ -298,6 +298,7 @@ const tagInputRef = ref(null)
 
 const SOURCE_BADGE_STYLES = {
   'source-cli': { background: 'rgba(35, 134, 54, 0.2)', color: '#3fb950', border: '1px solid rgba(35, 134, 54, 0.4)' },
+  'source-visual-studio': { background: 'rgba(92, 45, 145, 0.2)', color: '#b180d7', border: '1px solid rgba(92, 45, 145, 0.4)' },
   'source-vscode': { background: 'rgba(0, 122, 204, 0.2)', color: '#4fc3f7', border: '1px solid rgba(0, 122, 204, 0.4)' },
   'source-copilot': { background: 'rgba(88, 166, 255, 0.2)', color: '#58a6ff', border: '1px solid rgba(88, 166, 255, 0.4)' },
   'source-claude': { background: 'rgba(210, 153, 34, 0.2)', color: '#d29922', border: '1px solid rgba(210, 153, 34, 0.4)' },

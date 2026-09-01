@@ -22,16 +22,16 @@ test.describe('Per-Source Session Tests', () => {
   });
 
   test.describe('Homepage - Source Filter Pills', () => {
-    test('should have filter pills for each source', async ({ page }) => {
+    test('should show Visual Studio as the default source filter', async ({ page }) => {
       await page.goto('/');
       await page.locator('.filter-pill').first().waitFor({ timeout: 30000 });
 
-      // Check for source filter pills by their text content
+      const pills = page.locator('[data-testid="source-pill"]');
+      await expect(pills).toHaveCount(3);
+      await expect(pills.first()).toHaveText('Visual Studio');
+      await expect(pills.first()).toHaveClass(/bg-accent/);
       await expect(page.locator('.filter-pill').filter({ hasText: 'Copilot CLI' })).toBeVisible();
       await expect(page.locator('.filter-pill').filter({ hasText: 'Copilot Chat' })).toBeVisible();
-      await expect(page.locator('.filter-pill').filter({ hasText: 'Claude' })).toBeVisible();
-      await expect(page.getByRole('button', { name: 'Pi', exact: true })).toBeVisible();
-      await expect(page.getByRole('button', { name: 'Modernize', exact: false })).toBeVisible();
     });
   });
 

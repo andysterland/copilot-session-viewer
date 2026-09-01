@@ -2,6 +2,7 @@
  * Source Mapping — maps URL :source param to internal adapter types
  *
  * URL param      -> Adapter type
+ * visual-studio  -> visual-studio
  * copilot-cli    -> copilot
  * copilot-chat   -> vscode
  * claude         -> claude
@@ -10,6 +11,7 @@
  */
 
 const SOURCE_MAP = {
+  'visual-studio': { adapterType: 'visual-studio', label: 'Visual Studio' },
   'copilot-cli':  { adapterType: 'copilot',   label: 'Copilot CLI' },
   'copilot-chat': { adapterType: 'vscode',    label: 'Copilot Chat (VS Code)' },
   'claude':       { adapterType: 'claude',     label: 'Claude Code' },

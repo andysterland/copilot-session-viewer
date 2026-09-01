@@ -152,6 +152,7 @@ class Session {
 
     // Hardcoded fallback (kept for backward compatibility)
     const metadata = {
+      'visual-studio': { name: 'Visual Studio', badgeClass: 'source-visual-studio' },
       'copilot': { name: 'Copilot CLI', badgeClass: 'source-copilot' },
       'claude': { name: 'Claude', badgeClass: 'source-claude' },
       'pi-mono': { name: 'Pi', badgeClass: 'source-pi-mono' },

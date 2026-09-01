@@ -19,14 +19,7 @@
 
     <template v-else-if="settings">
       <section class="desktop-settings-view__panel">
-        <h2>Privacy and updates</h2>
-        <label class="desktop-settings-view__toggle">
-          <input v-model="settings.telemetryEnabled" type="checkbox" @change="saveSettings">
-          <span>
-            <strong>Share operational telemetry</strong>
-            <small>Disabled by default. A restart is required after changing this setting.</small>
-          </span>
-        </label>
+        <h2>Updates</h2>
         <label class="desktop-settings-view__field">
           <span>
             <strong>Update channel</strong>
@@ -114,12 +107,11 @@ let removeUpdateListener = null;
 async function saveSettings() {
   try {
     const result = await bridge.updateSettings({
-      telemetryEnabled: settings.value.telemetryEnabled,
       updateChannel: settings.value.updateChannel,
       executablePaths: settings.value.executablePaths
     });
     status.value = result.restartRequired
-      ? 'Settings saved. Restart to apply telemetry or executable-path changes.'
+      ? 'Settings saved. Restart to apply executable-path changes.'
       : 'Settings saved.';
   } catch (error) {
     status.value = `Could not save settings: ${error.message}`;
@@ -240,7 +232,6 @@ onUnmounted(() => removeUpdateListener?.());
   margin: 0 0 16px;
 }
 
-.desktop-settings-view__toggle,
 .desktop-settings-view__field {
   align-items: center;
   display: flex;
@@ -249,11 +240,6 @@ onUnmounted(() => removeUpdateListener?.());
   margin-top: 14px;
 }
 
-.desktop-settings-view__toggle {
-  justify-content: flex-start;
-}
-
-.desktop-settings-view__toggle span,
 .desktop-settings-view__field span {
   display: grid;
   gap: 3px;

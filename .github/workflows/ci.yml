@@ -39,8 +39,6 @@ jobs:
       
       - name: Run unit tests
         run: npm test
-        env:
-          DISABLE_TELEMETRY: 'true'
 
   web-e2e-and-package:
     runs-on: ubuntu-latest
@@ -119,7 +117,6 @@ jobs:
           chmod +x node_modules/.bin/copilot-session-viewer 2>/dev/null || true
           # Quick smoke test: server starts and serves SPA index from tarball
           export PORT=3839
-          export DISABLE_TELEMETRY=true
           node node_modules/@qiaolei81/copilot-session-viewer/dist/server.min.js &
           SERVER_PID=$!
           sleep 5
@@ -128,8 +125,6 @@ jobs:
       
       - name: Run E2E tests (playwright spawns its own server with fixture env)
         run: npm run test:e2e
-        env:
-          DISABLE_TELEMETRY: 'true'
       
       - name: Upload test results
         if: failure()

@@ -18,26 +18,29 @@ describe('desktop settings', () => {
     await fs.promises.rm(root, { recursive: true, force: true });
   });
 
-  it('defaults telemetry to disabled and persists versioned settings', async () => {
+  it('persists versioned settings without telemetry configuration', async () => {
     const store = new SettingsStore(settingsPath);
     const settings = await store.load();
-    expect(settings.telemetryEnabled).toBe(false);
     expect(settings.version).toBe(CURRENT_SETTINGS_VERSION);
+    expect(settings).not.toHaveProperty('telemetryEnabled');
 
-    await store.update({ telemetryEnabled: true });
+    await store.update({ updateChannel: 'prerelease' });
     const reloaded = new SettingsStore(settingsPath);
-    expect((await reloaded.load()).telemetryEnabled).toBe(true);
+    expect((await reloaded.load()).updateChannel).toBe('prerelease');
   });
 
-  it('migrates unversioned settings', () => {
-    expect(migrateSettings({
-      telemetryEnabled: true,
-      executablePaths: { copilot: 'configured-copilot' }
-    })).toMatchObject({
-      version: CURRENT_SETTINGS_VERSION,
+  it('removes telemetry configuration when migrating older settings', () => {
+    const migrated = migrateSettings({
+      version: 1,
       telemetryEnabled: true,
       executablePaths: { copilot: 'configured-copilot' }
     });
+
+    expect(migrated).toMatchObject({
+      version: CURRENT_SETTINGS_VERSION,
+      executablePaths: { copilot: 'configured-copilot' }
+    });
+    expect(migrated).not.toHaveProperty('telemetryEnabled');
   });
 
   it('backs up corrupt settings before recovering defaults', async () => {
@@ -46,7 +49,7 @@ describe('desktop settings', () => {
     const logger = { error: jest.fn() };
     const store = new SettingsStore(settingsPath, { logger });
 
-    expect((await store.load()).telemetryEnabled).toBe(false);
+    expect((await store.load()).updateChannel).toBe('stable');
     const files = await fs.promises.readdir(root);
     expect(files.some(file => file.startsWith('settings.json.corrupt-'))).toBe(true);
     expect(logger.error).toHaveBeenCalledWith('settings.recovered', expect.any(Object));

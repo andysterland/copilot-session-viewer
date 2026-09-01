@@ -19,6 +19,7 @@ test.beforeAll(async () => {
       E2E_USE_FIXTURES: '1',
       ELECTRON_USER_DATA_DIR: path.join(artifacts, 'user-data'),
       ELECTRON_TEST_DIRECTORY: path.join(root, '__tests__', 'fixtures', 'sessions', 'copilot-cli'),
+      VISUAL_STUDIO_SESSION_DIR: path.join(root, '__tests__', 'fixtures', 'sessions', 'copilot-cli'),
       COPILOT_SESSION_DIR: path.join(root, '__tests__', 'fixtures', 'sessions', 'copilot-cli'),
       CLAUDE_SESSION_DIR: path.join(root, '__tests__', 'fixtures', 'sessions', 'claude'),
       PI_MONO_SESSION_DIR: path.join(root, '__tests__', 'fixtures', 'sessions', 'pi-mono'),
@@ -30,7 +31,6 @@ test.beforeAll(async () => {
       KNOWN_TAGS_DIR: path.join(artifacts, 'tags'),
       ELECTRON_TEST_EXTERNAL_URL_FILE: path.join(artifacts, 'external-url.txt'),
       ELECTRON_TEST_EXPORT_PATH: path.join(artifacts, 'session-export.zip'),
-      DISABLE_TELEMETRY: 'true',
       ELECTRON_ENABLE_UPDATES: 'false'
     }
   });
@@ -240,10 +240,10 @@ test('can load and update versioned desktop settings', async () => {
   await page.getByRole('menuitem', { name: /Desktop Settings/ }).click();
   await expect(page).toHaveURL(/#\/desktop\/settings$/);
   await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
-  await expect(page.getByText('Share operational telemetry', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Updates' })).toBeVisible();
   const settings = await page.evaluate(() => globalThis.copilotSessionViewer.getSettings());
-  expect(settings.version).toBe(1);
-  expect(settings.telemetryEnabled).toBe(false);
+  expect(settings.version).toBe(2);
+  expect(settings).not.toHaveProperty('telemetryEnabled');
 });
 
 test('presents accessible prompt and destructive confirmation dialogs', async () => {

@@ -28,6 +28,7 @@ const FIXTURES = path.join(TMP_ROOT, 'sessions');
 copyDir(SRC_FIXTURES, FIXTURES);
 
 // Point adapters at temp-copy fixture directories BEFORE requiring the app
+process.env.VISUAL_STUDIO_SESSION_DIR = path.join(FIXTURES, 'copilot-cli');
 process.env.COPILOT_SESSION_DIR = path.join(FIXTURES, 'copilot-cli');
 process.env.CLAUDE_SESSION_DIR = path.join(FIXTURES, 'claude');
 process.env.VSCODE_WORKSPACE_STORAGE_DIR = path.join(FIXTURES, 'vscode-empty');
@@ -80,17 +81,18 @@ describe('GET /api/sources', () => {
     }
   });
 
-  it('includes all 5 configured sources', async () => {
+  it('includes all 6 configured sources', async () => {
     const res = await request(app).get('/api/sources');
     const ids = res.body.map(s => s.id);
     expect(ids).toEqual(expect.arrayContaining([
-      'copilot-cli', 'claude', 'copilot-chat', 'pi-mono', 'modernize'
+      'visual-studio', 'copilot-cli', 'claude', 'copilot-chat', 'pi-mono', 'modernize'
     ]));
   });
 });
 
 // ── Per-source full endpoint coverage ──
 const SOURCES = [
+  { urlSource: 'visual-studio', minSessions: 1, hasEvents: true },
   { urlSource: 'copilot-cli', minSessions: 1, hasEvents: true },
   { urlSource: 'claude', minSessions: 1, hasEvents: true },
   { urlSource: 'copilot-chat', minSessions: 0, hasEvents: false }, // vscode-empty fixture (no PII demo session)

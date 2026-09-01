@@ -1,10 +1,16 @@
-// IMPORTANT: Initialize telemetry FIRST, before any other requires (especially Express)
-require('./src/server/telemetry');
-
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
 const createApp = require('./src/server/app');
 const config = require('./src/server/config');
 const processManager = require('./src/server/utils/processManager');
 const { startServer } = require('./src/server/lifecycle');
+
+try {
+  fs.rmSync(path.join(os.homedir(), '.copilot-session-viewer', 'analytics-id'), { force: true });
+} catch (error) {
+  console.warn('Failed to remove legacy analytics identifier:', error.message);
+}
 
 // Create the Express app
 const app = createApp();

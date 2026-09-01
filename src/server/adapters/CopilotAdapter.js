@@ -171,7 +171,7 @@ class CopilotAdapter extends BaseSourceAdapter {
     }
 
     const session = Session.fromDirectory(fullPath, entry, stats, workspace, eventCount, duration, isImported, hasInsight, copilotVersion, selectedModel, sessionStatus);
-    session.source = 'copilot';
+    session.source = this.type;
     return session;
   }
 
@@ -190,7 +190,7 @@ class CopilotAdapter extends BaseSourceAdapter {
       optimizedMetadata.selectedModel,
       sessionStatus
     );
-    session.source = 'copilot';
+    session.source = this.type;
     return session;
   }
 

@@ -1,14 +1,8 @@
 const config = require('../config');
-const { trackException } = require('../telemetry');
 
 // Request timeout middleware
 const requestTimeout = (req, res, next) => {
   req.setTimeout(config.REQUEST_TIMEOUT_MS);
-  next();
-};
-
-// Telemetry middleware - no-op (connection strings must not be exposed to clients)
-const telemetryLocals = (req, res, next) => {
   next();
 };
 
@@ -37,13 +31,6 @@ const errorHandler = (err, req, res, _next) => {
     error: err
   });
 
-  // Track exception in Application Insights
-  trackException(err, {
-    path: req.path,
-    method: req.method,
-    statusCode: (err.status || 500).toString()
-  });
-
   const statusCode = err.status || 500;
   // Default to production-safe behavior if NODE_ENV is not set
   const isDevelopment = config.NODE_ENV === 'development';
@@ -65,6 +52,5 @@ module.exports = {
   requestTimeout,
   developmentCors,
   errorHandler,
-  notFoundHandler,
-  telemetryLocals
+  notFoundHandler
 };

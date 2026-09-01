@@ -124,7 +124,9 @@ class SessionService {
     events = events.filter(e => e.type !== 'file-history-snapshot');
 
     // Normalize events to unified format (convert Claude format to standard)
-    const effectiveSource = session.source === 'vscode' ? 'copilot' : session.source;
+    const effectiveSource = ['visual-studio', 'vscode'].includes(session.source)
+      ? 'copilot'
+      : session.source;
     events = events.map(event => this._normalizeEvent(event, effectiveSource));
     
     // Load and merge sub-agent events (for both Copilot and Claude)
@@ -134,7 +136,7 @@ class SessionService {
     }
     
     // Re-run tool matching after merging subagents (subagent events need matching too)
-    if ((adapter && !adapter.hasCustomPipeline && session.source === 'copilot') || session.source === 'vscode') {
+    if ((adapter && !adapter.hasCustomPipeline && ['copilot', 'visual-studio'].includes(session.source)) || session.source === 'vscode') {
       this._matchCopilotToolCalls(events);
       this._mergeHookEvents(events);
       events = this._expandCopilotToTimelineFormat(events);
@@ -222,7 +224,7 @@ class SessionService {
         console.error('Error searching Claude subagents:', err);
         return;
       }
-    } else if (source === 'copilot' && mainEventsFile) {
+    } else if (['copilot', 'visual-studio'].includes(source) && mainEventsFile) {
       // For Copilot sessions, detect from main events file path
       const eventsDir = path.dirname(mainEventsFile);
       const eventsBasename = path.basename(mainEventsFile);
@@ -1505,7 +1507,7 @@ class SessionService {
     }
 
     // Dispatch to source-specific builder
-    if (session.source === 'copilot' || session.source === 'vscode') {
+    if (['copilot', 'visual-studio', 'vscode'].includes(session.source)) {
       return this._buildCopilotTimeline(events, session);
     } else if (session.source === 'claude') {
       return this._buildClaudeTimeline(events, session);
@@ -2297,4 +2299,3 @@ class SessionService {
 }
 
 module.exports = SessionService;
-

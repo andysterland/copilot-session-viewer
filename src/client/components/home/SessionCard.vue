@@ -96,6 +96,7 @@ const modelStyle = computed(() => {
 });
 
 const SOURCE_STYLES = {
+  'source-visual-studio': { bg: 'rgba(92, 45, 145, 0.15)', color: '#b180d7' },
   'source-copilot': { bg: 'rgba(88, 166, 255, 0.15)', color: '#58a6ff' },
   'source-claude': { bg: 'rgba(204, 120, 92, 0.15)', color: '#e8956f' },
   'source-pi-mono': { bg: 'rgba(138, 102, 204, 0.15)', color: '#a78bdb' },

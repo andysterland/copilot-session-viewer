@@ -269,7 +269,7 @@ All session sources are normalized to a consistent schema:
 - No external API calls for session data
 - All processing happens locally
 - Optional AI insights require user action
-- Desktop telemetry is disabled by default and requires explicit opt-in
+- No telemetry or analytics data is collected or transmitted
 - Rotating, redacted desktop diagnostic logs remain local
 
 ---

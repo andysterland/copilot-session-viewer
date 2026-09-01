@@ -24,6 +24,13 @@ class InsightService {
    */
   _getToolConfig(source, sessionPath) {
     const configs = {
+      'visual-studio': {
+        name: 'Copilot',
+        executable: 'copilot',
+        cli: 'copilot',
+        args: (tmpDir, prompt) => ['--config-dir', tmpDir, '--yolo', '-p', prompt],
+        cwd: sessionPath
+      },
       copilot: {
         name: 'Copilot',
         executable: 'copilot',

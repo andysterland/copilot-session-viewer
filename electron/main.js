@@ -512,7 +512,6 @@ async function showServerRecovery(message = 'The local application server stoppe
 }
 
 function configureEnvironment(settings) {
-  process.env.DISABLE_TELEMETRY = settings.telemetryEnabled ? 'false' : 'true';
   process.env.PROCESS_MANAGER_DISABLE_SIGNAL_HANDLERS = 'true';
   process.env.CUSTOM_DIRS_REGISTRY = path.join(app.getPath('userData'), 'registered-dirs.json');
   process.env.KNOWN_TAGS_DIR = path.join(app.getPath('userData'), 'tags');
@@ -591,7 +590,7 @@ function registerIpcHandlers() {
     updater?.applySettings(updated);
     return {
       ...updated,
-      restartRequired: patch.telemetryEnabled !== undefined || patch.executablePaths !== undefined
+      restartRequired: patch.executablePaths !== undefined
     };
   });
   registerIpcHandler(CHANNELS.OPEN_LOGS, noArgumentSchema, async () => {
@@ -685,8 +684,7 @@ async function shutdown() {
   }
   await Promise.race([
     Promise.allSettled([
-      logger?.flush(),
-      require('../src/server/telemetry').flush()
+      logger?.flush()
     ]),
     new Promise(resolve => setTimeout(resolve, 2000))
   ]);

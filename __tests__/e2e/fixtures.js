@@ -62,7 +62,7 @@ async function getSessionsWithRetry(request, options = {}) {
  * Fetch sessions from all sources and return a merged array.
  */
 async function getAllSourceSessionsWithRetry(request, options = {}) {
-  const sources = ['copilot-cli', 'claude', 'copilot-chat', 'pi-mono', 'modernize'];
+  const sources = ['copilot-cli', 'claude', 'copilot-chat', 'pi-mono', 'modernize', 'visual-studio'];
   const results = await Promise.allSettled(
     sources.map(source =>
       getSessionsWithRetry(request, { ...options, source })

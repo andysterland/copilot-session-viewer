@@ -11,6 +11,7 @@ const AdapterRegistry = require('./AdapterRegistry');
 const BaseSourceAdapter = require('./BaseSourceAdapter');
 
 // Concrete adapters
+const VisualStudioAdapter = require('./VisualStudioAdapter');
 const CopilotAdapter = require('./CopilotAdapter');
 const ClaudeAdapter = require('./ClaudeAdapter');
 const PiMonoAdapter = require('./PiMonoAdapter');
@@ -21,6 +22,7 @@ const ModernizeAdapter = require('./ModernizeAdapter');
 const registry = new AdapterRegistry();
 
 // --- Register adapters here ---
+registry.register(new VisualStudioAdapter());
 registry.register(new CopilotAdapter());
 registry.register(new ClaudeAdapter());
 registry.register(new PiMonoAdapter());

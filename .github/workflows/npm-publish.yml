@@ -53,7 +53,6 @@ jobs:
           test ! -d node_modules/@qiaolei81/copilot-session-viewer/src
           test ! -d node_modules/@qiaolei81/copilot-session-viewer/__tests__
           echo "--- Smoke test: server starts ---"
-          export DISABLE_TELEMETRY=true
           export PORT=3839
           node node_modules/@qiaolei81/copilot-session-viewer/dist/server.min.js &
           sleep 3

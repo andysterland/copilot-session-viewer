@@ -29,7 +29,6 @@ const CHANNELS = Object.freeze({
 const noArgumentSchema = z.undefined();
 const executableSchema = z.enum(['copilot', 'claude', 'pi']);
 const settingsPatchSchema = z.object({
-  telemetryEnabled: z.boolean().optional(),
   updateChannel: z.enum(['stable', 'prerelease']).optional(),
   executablePaths: z.object({
     copilot: z.string().nullable().optional(),

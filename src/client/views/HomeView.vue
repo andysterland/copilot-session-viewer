@@ -132,7 +132,7 @@ const sessionInput = ref('');
 const allSessions = ref([]);
 const isLoading = ref(false);
 const hasLoaded = ref(false);
-const currentSourceFilter = ref('copilot');
+const currentSourceFilter = ref('visual-studio');
 const sourceHints = ref({});
 const sourceState = {};
 
@@ -146,11 +146,9 @@ const bottomSheetRef = ref(null);
 const FILTER_STORAGE_KEY = 'sessionViewer.sourceFilter';
 
 const filterPills = [
+  { source: 'visual-studio', label: 'Visual Studio' },
   { source: 'copilot', label: 'Copilot CLI' },
   { source: 'vscode', label: 'Copilot Chat' },
-  { source: 'claude', label: 'Claude' },
-  { source: 'modernize', label: 'Modernize CLI' },
-  { source: 'pi-mono', label: 'Pi' },
 ];
 
 // Restore filter from localStorage

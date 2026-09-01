@@ -39,6 +39,7 @@ const child = spawn(executable, ['--smoke-test'], {
     E2E_USE_FIXTURES: '1',
     ELECTRON_ENABLE_UPDATES: 'false',
     ELECTRON_USER_DATA_DIR: path.join(artifacts, 'user-data'),
+    VISUAL_STUDIO_SESSION_DIR: path.join(fixtures, 'copilot-cli'),
     COPILOT_SESSION_DIR: path.join(fixtures, 'copilot-cli'),
     CLAUDE_SESSION_DIR: path.join(fixtures, 'claude'),
     PI_MONO_SESSION_DIR: path.join(fixtures, 'pi-mono'),
@@ -47,8 +48,7 @@ const child = spawn(executable, ['--smoke-test'], {
     SESSION_DIR: path.join(artifacts, 'imported-sessions'),
     UPLOAD_DIR: path.join(artifacts, 'uploads'),
     CUSTOM_DIRS_REGISTRY: path.join(artifacts, 'registered-dirs.json'),
-    KNOWN_TAGS_DIR: path.join(artifacts, 'tags'),
-    DISABLE_TELEMETRY: 'true'
+    KNOWN_TAGS_DIR: path.join(artifacts, 'tags')
   }
 });
 function cleanup() {

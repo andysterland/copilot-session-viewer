@@ -2,10 +2,9 @@ const fs = require('fs');
 const path = require('path');
 const { z } = require('zod');
 
-const CURRENT_SETTINGS_VERSION = 1;
+const CURRENT_SETTINGS_VERSION = 2;
 const DEFAULT_SETTINGS = Object.freeze({
   version: CURRENT_SETTINGS_VERSION,
-  telemetryEnabled: false,
   updateChannel: 'stable',
   executablePaths: {
     copilot: null,
@@ -23,7 +22,6 @@ const DEFAULT_SETTINGS = Object.freeze({
 
 const settingsSchema = z.object({
   version: z.literal(CURRENT_SETTINGS_VERSION),
-  telemetryEnabled: z.boolean(),
   updateChannel: z.enum(['stable', 'prerelease']),
   executablePaths: z.object({
     copilot: z.string().nullable(),
@@ -47,10 +45,10 @@ function migrateSettings(value) {
   if (!value || typeof value !== 'object') return cloneDefaults();
   if (value.version === CURRENT_SETTINGS_VERSION) return value;
 
-  if (value.version === undefined || value.version === 0) {
+  if (value.version === undefined || value.version === 0 || value.version === 1) {
     return {
       ...cloneDefaults(),
-      telemetryEnabled: value.telemetryEnabled === true,
+      updateChannel: value.updateChannel === 'prerelease' ? 'prerelease' : 'stable',
       executablePaths: {
         ...cloneDefaults().executablePaths,
         ...(value.executablePaths || {})

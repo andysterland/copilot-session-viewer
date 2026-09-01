@@ -4,7 +4,6 @@ const os = require('os');
 const crypto = require('crypto');
 const multer = require('multer');
 const { isValidSessionId } = require('../utils/helpers');
-const { trackEvent, trackException } = require('../telemetry');
 const config = require('../config');
 const { registry } = require('../adapters');
 const { ZipExtractionService } = require('../services/zipExtractionService');
@@ -75,7 +74,6 @@ class UploadController {
         return res.status(result.statusCode || 500).json(body);
       }
 
-      trackEvent('SessionImported', { format: result.format, fileSize: uploadedFileSize.toString() });
       req.logger?.info?.('import.completed', {
         correlationId: req.correlationId,
         format: result.format,
@@ -90,7 +88,6 @@ class UploadController {
         correlationId: req.correlationId,
         error: err
       });
-      trackException(err, { operation: 'importSession_upload' });
       if (req.file) await fs.promises.unlink(req.file.path).catch(() => {});
       if (extractDir) await fs.promises.rm(extractDir, { recursive: true, force: true }).catch(() => {});
       // Surface known validation errors as 400

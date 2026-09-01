@@ -4,6 +4,7 @@
  */
 
 const ADAPTER_TO_URL = {
+  'visual-studio': 'visual-studio',
   copilot:   'copilot-cli',
   vscode:    'copilot-chat',
   claude:    'claude',

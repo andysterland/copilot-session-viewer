@@ -108,12 +108,11 @@ All interactive shell elements require an accessible name and visible keyboard f
 
 Open **File → Desktop Settings** to navigate to the dedicated settings view and:
 
-- opt in to Application Insights telemetry (disabled by default)
 - select stable or prerelease updates
 - choose absolute `copilot`, `claude`, and `pi` executable paths
 - open logs or export a sanitized diagnostic ZIP
 
-Telemetry and executable-path changes take effect after restart. The inherited `PATH` is used after configured paths; macOS also checks common Homebrew and user-local binary directories. Commands are spawned directly without a shell.
+Executable-path changes take effect after restart. The inherited `PATH` is used after configured paths; macOS also checks common Homebrew and user-local binary directories. Commands are spawned directly without a shell.
 
 Registered directories and known-tag indexes are isolated in Electron user data. Session files and per-session tags remain in their original source directories.
 
@@ -129,20 +128,9 @@ Typical locations:
 
 Settings use a migrated versioned schema. Corrupt settings are copied to a timestamped `.corrupt-*` backup before defaults are restored.
 
-Desktop JSONL logs rotate at 5 MiB with seven retained files. They include timestamp, severity, component, application version, platform, event, duration, status, and correlation identifiers. Authentication data, cookies, tokens, prompts, event/session contents, session identifiers, dialog text, user input, and file paths are redacted. Diagnostic exports add application/platform metadata but no session data. Main-process diagnostics remain local; server telemetry is sent only after opt-in.
+Desktop JSONL logs rotate at 5 MiB with seven retained files. They include timestamp, severity, component, application version, platform, event, duration, status, and correlation identifiers. Authentication data, cookies, tokens, prompts, event/session contents, session identifiers, dialog text, user input, and file paths are redacted. Diagnostic exports add application/platform metadata but no session data.
 
-Local shell events include initialization, focus changes, minimize/maximize/restore, close requests, allowlisted menu command IDs, dialog type/source, and dialog result action. They never include menu state, dialog content, input values, sessions, or paths. Remote instrumentation remains subject to the existing telemetry opt-in.
-
-When telemetry is enabled, the server records API request timing/status after first normalizing each route; Application Insights also auto-collects dependency timing/status and performance counters. Request URLs are normalized to `localhost`, query strings are discarded, and session IDs in route paths are replaced with `{sessionId}` before transmission. Hostname and machine-identity tags are removed. The one-time desktop bootstrap credential is sent only in a request header, never in a URL. Custom events are:
-
-- `SessionListLoaded`: source and session count
-- `SessionViewed`, `SessionEventsLoaded`, `TimelineViewed`, `SessionExported`: source and count/pagination where applicable
-- `SessionImported`: detected format and compressed file size
-- `TagUpdated`: tag count
-- `InsightGenerated`, `InsightViewed`, `InsightDeleted`: source and duration where applicable
-- `InsightGenerationTime`: duration metric and source
-
-Every telemetry item includes application version and a persistent random installation identifier. Session identifiers, prompts, event bodies, file contents, authentication tokens, cookies, hostnames, and configured executable paths are not custom telemetry properties. Caught exceptions are reported by error category only; original exception messages and stacks remain local.
+Local shell events include initialization, focus changes, minimize/maximize/restore, close requests, allowlisted menu command IDs, dialog type/source, and dialog result action. They never include menu state, dialog content, input values, sessions, or paths. The application contains no telemetry or analytics integration; logs and diagnostic exports remain on the local machine unless the user explicitly exports them.
 
 ## Updates and packages
 

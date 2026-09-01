@@ -1,7 +1,6 @@
 const SessionService = require('../services/sessionService');
 const { isValidSessionId } = require('../utils/helpers');
 const { resolveSource } = require('../utils/sourceMapping');
-const { trackEvent } = require('../telemetry');
 const AdmZip = require('adm-zip');
 const path = require('path');
 const fs = require('fs');
@@ -88,12 +87,6 @@ class SessionController {
         const pageNum = Math.floor(offset / limit) + 1;
         const paginationData = await this.sessionService.getPaginatedSessions(pageNum, limit, sourceFilter);
 
-        trackEvent('SessionListLoaded', {
-          offset: offset.toString(),
-          limit: limit.toString(),
-          totalSessions: paginationData.totalSessions.toString()
-        });
-
         res.set({ 'Cache-Control': 'public, max-age=60' });
         this._logSessionDiscovery(req, sourceFilter, paginationData.sessions.length, startedAt);
         res.json({
@@ -107,12 +100,6 @@ class SessionController {
           return res.status(400).json({ error: 'Invalid pagination parameters' });
         }
         const paginationData = await this.sessionService.getPaginatedSessions(page, limit, sourceFilter);
-
-        trackEvent('SessionListLoaded', {
-          page: page.toString(),
-          limit: limit.toString(),
-          totalSessions: paginationData.totalSessions.toString()
-        });
 
         res.set({ 'Cache-Control': 'public, max-age=60' });
         this._logSessionDiscovery(req, sourceFilter, paginationData.sessions.length, startedAt);
@@ -165,7 +152,6 @@ class SessionController {
       } catch (usageErr) {
         console.warn('Failed to extract usage data:', usageErr.message);
       }
-      trackEvent('SessionViewed', { source: session.source || 'unknown' });
       req.logger?.info?.('session.loaded', {
         correlationId: req.correlationId,
         source: session.source || 'unknown',
@@ -234,7 +220,6 @@ class SessionController {
             hasMore: offset + limit < result.total
           }
         });
-        trackEvent('SessionEventsLoaded', { source: session.source || 'unknown', eventCount: result.total, paginated: true });
         req.logger?.info?.('session.events-loaded', {
           correlationId: req.correlationId,
           source: session.source || 'unknown',
@@ -243,7 +228,6 @@ class SessionController {
         });
       } else {
         res.json(result);
-        trackEvent('SessionEventsLoaded', { source: session.source || 'unknown', eventCount: Array.isArray(result) ? result.length : 0, paginated: false });
         req.logger?.info?.('session.events-loaded', {
           correlationId: req.correlationId,
           source: session.source || 'unknown',
@@ -292,7 +276,6 @@ class SessionController {
         'Vary': 'Accept-Encoding'
       });
 
-      trackEvent('TimelineViewed', { source: session.source || 'unknown' });
       res.json(timeline);
     } catch (err) {
       console.error('Error loading timeline:', err);
@@ -340,10 +323,12 @@ class SessionController {
 
       // Legacy source-specific lookup as fallback
       if (!sessionPath) {
-        if (session.source === 'copilot') {
-          const copilotSource = this.sessionService.sessionRepository.sources.find(s => s.type === 'copilot');
-          if (copilotSource) {
-            const basePath = path.join(copilotSource.dir, sessionId);
+        if (['copilot', 'visual-studio'].includes(session.source)) {
+          const copilotFormatSource = this.sessionService.sessionRepository.sources.find(
+            source => source.type === session.source
+          );
+          if (copilotFormatSource) {
+            const basePath = path.join(copilotFormatSource.dir, sessionId);
             try {
               const stats = await fs.promises.stat(basePath);
               if (stats.isDirectory()) {
@@ -424,8 +409,6 @@ class SessionController {
       const zipBuffer = zip.toBuffer();
       res.setHeader('Content-Type', 'application/zip');
       res.setHeader('Content-Disposition', `attachment; filename="session-${sessionId}.zip"`);
-
-      trackEvent('SessionExported');
 
       res.send(zipBuffer);
     } catch (err) {

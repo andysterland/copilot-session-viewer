@@ -1,5 +1,4 @@
 const crypto = require('crypto');
-const { trackRequest } = require('../telemetry');
 
 const CORRELATION_HEADER = 'x-correlation-id';
 
@@ -40,16 +39,6 @@ function requestContext(options = {}) {
 
     res.on('finish', () => {
       const durationMs = Date.now() - startedAt;
-      if (req.path.startsWith('/api/') || req.path === '/desktop-auth') {
-        trackRequest({
-          name: `${req.method} ${req.path}`,
-          url: req.originalUrl,
-          duration: durationMs,
-          resultCode: res.statusCode,
-          success: res.statusCode < 400,
-          properties: { method: req.method }
-        });
-      }
       if (req.path.startsWith('/api/') && req.logger?.info) {
         req.logger.info('http.request.completed', {
           correlationId,

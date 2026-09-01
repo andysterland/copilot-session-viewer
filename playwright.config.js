@@ -16,6 +16,7 @@ const FIXTURES = path.join(__dirname, '__tests__', 'fixtures', 'sessions');
 // (which sets the flag) never touches the developer's real session data, even
 // if they manually started `npm start` first and Playwright reuses that server.
 const FIXTURE_ENV = process.env.E2E_USE_FIXTURES === '1' ? {
+  VISUAL_STUDIO_SESSION_DIR: process.env.VISUAL_STUDIO_SESSION_DIR || path.join(FIXTURES, 'copilot-cli'),
   COPILOT_SESSION_DIR: process.env.COPILOT_SESSION_DIR || path.join(FIXTURES, 'copilot-cli'),
   CLAUDE_SESSION_DIR: process.env.CLAUDE_SESSION_DIR || path.join(FIXTURES, 'claude'),
   PI_MONO_SESSION_DIR: process.env.PI_MONO_SESSION_DIR || path.join(FIXTURES, 'pi-mono'),

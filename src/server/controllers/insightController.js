@@ -1,6 +1,5 @@
 const InsightService = require('../services/insightService');
 const { isValidSessionId } = require('../utils/helpers');
-const { trackEvent, trackMetric, trackException } = require('../telemetry');
 
 class InsightController {
   constructor(insightService = null, sessionService = null) {
@@ -76,12 +75,6 @@ class InsightController {
       );
       const durationMs = Date.now() - startTime;
 
-      trackEvent('InsightGenerated', {
-        source: session.source || 'unknown',
-        durationMs: durationMs.toString()
-      });
-
-      trackMetric('InsightGenerationTime', durationMs, { source: session.source || 'unknown' });
       req.logger?.info?.('insight.request-completed', {
         correlationId: req.correlationId,
         source: session.source || 'unknown',
@@ -93,9 +86,6 @@ class InsightController {
     } catch (err) {
       console.error('Error generating insight:', err);
 
-      trackException(err, {
-        operation: 'generateInsight'
-      });
       req.logger?.error?.('insight.request-failed', {
         correlationId: req.correlationId,
         error: err
@@ -126,10 +116,6 @@ class InsightController {
 
       const result = await this.insightService.getInsightStatus(session.id, session.directory, session.source);
 
-      if (result.status === 'ready' && result.report) {
-        trackEvent('InsightViewed');
-      }
-
       res.json(result);
     } catch (err) {
       console.error('Error getting insight status:', err);
@@ -156,8 +142,6 @@ class InsightController {
       }
 
       const result = await this.insightService.deleteInsight(session.id, session.directory, session.source);
-
-      trackEvent('InsightDeleted');
 
       res.json(result);
     } catch (err) {

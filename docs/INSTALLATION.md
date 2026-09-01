@@ -173,6 +173,7 @@ copilot --model gemini-3-pro -p "Write a simple hello world in Python"
 Sessions will be saved to:
 - **macOS/Linux**: `~/.copilot/session-state/`
 - **Windows**: `C:\Users\<username>\.copilot\session-state\`
+- **Visual Studio on Windows**: `%LOCALAPPDATA%\Microsoft\VisualStudio\CopilotCli\session-state\`
 
 ---
 
@@ -188,6 +189,7 @@ PORT=3838
 NODE_ENV=development
 
 # Session directories (all auto-detected if omitted)
+VISUAL_STUDIO_SESSION_DIR=/path/to/session-state     # Visual Studio Copilot CLI
 COPILOT_SESSION_DIR=/path/to/custom/session-state   # GitHub Copilot CLI
 SESSION_DIR=/path/to/custom/session-state            # Legacy alias for COPILOT_SESSION_DIR
 CLAUDE_SESSION_DIR=/path/to/claude/projects          # Claude Code CLI

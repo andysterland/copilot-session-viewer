@@ -17,9 +17,10 @@ describe('preload and IPC security', () => {
   it('validates IPC arguments with explicit schemas', () => {
     expect(executableSchema.parse('copilot')).toBe('copilot');
     expect(() => executableSchema.parse('../arbitrary')).toThrow();
-    expect(settingsPatchSchema.parse({ telemetryEnabled: true })).toEqual({
-      telemetryEnabled: true
+    expect(settingsPatchSchema.parse({ updateChannel: 'prerelease' })).toEqual({
+      updateChannel: 'prerelease'
     });
+    expect(() => settingsPatchSchema.parse({ telemetryEnabled: true })).toThrow();
     expect(() => settingsPatchSchema.parse({ arbitraryChannel: true })).toThrow();
     expect(noArgumentSchema.parse(undefined)).toBeUndefined();
     expect(() => noArgumentSchema.parse({})).toThrow();

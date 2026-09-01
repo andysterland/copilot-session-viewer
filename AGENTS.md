@@ -20,12 +20,11 @@ Web UI for viewing and analyzing AI coding-agent session logs (GitHub Copilot CL
 
 ## File structure
 ```
-server.js                          # Entry: telemetry init + app.listen
+server.js                          # Entry: app creation + app.listen
 src/
   server/
     app.js                         # Express app factory (middleware, routes)
     config.js                      # Configuration constants
-    telemetry.js                   # App Insights init (must load first)
     controllers/                   # Route handlers (session, dir, tag, insight, upload, ...)
     middleware/                    # Express middleware (rate limit, validation, ...)
     services/                      # sessionService, sessionRepository, insightService,

@@ -98,8 +98,6 @@ export default [
         DOMPurify: 'readonly',
         trackClick: 'readonly',
         trackPageView: 'readonly',
-        trackMetric: 'readonly',
-        appInsights: 'readonly',
       },
     },
     rules: {

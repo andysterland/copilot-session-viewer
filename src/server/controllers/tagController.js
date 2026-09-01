@@ -1,7 +1,6 @@
 const TagService = require('../services/tagService');
 const SessionRepository = require('../services/sessionRepository');
 const { isValidSessionId } = require('../utils/helpers');
-const { trackEvent } = require('../telemetry');
 
 class TagController {
   constructor(tagService = null, sessionRepository = null) {
@@ -90,10 +89,6 @@ class TagController {
       }
 
       const savedTags = await this.tagService.setSessionTags(session, tags);
-
-      trackEvent('TagUpdated', {
-        tagCount: savedTags.length.toString()
-      });
 
       res.json({ tags: savedTags });
     } catch (err) {

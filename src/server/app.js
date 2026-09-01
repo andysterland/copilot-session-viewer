@@ -43,7 +43,7 @@ function resolvePublicDirectory(explicitPath) {
 // Middleware
 // Rate limiting disabled for local development
 
-const { requestTimeout, developmentCors, errorHandler, notFoundHandler, telemetryLocals } = require('./middleware/common');
+const { requestTimeout, developmentCors, errorHandler, notFoundHandler } = require('./middleware/common');
 const { requestContext } = require('./middleware/requestContext');
 const { createDesktopSecurityMiddleware } = require('./middleware/desktopSecurity');
 
@@ -136,7 +136,6 @@ function createApp(options = {}) {
     includeErrorId: Boolean(options.desktopSecurity)
   }));
   app.use(requestTimeout);
-  app.use(telemetryLocals);
 
   if (options.desktopSecurity) {
     const desktopSecurity = createDesktopSecurityMiddleware(options.desktopSecurity);

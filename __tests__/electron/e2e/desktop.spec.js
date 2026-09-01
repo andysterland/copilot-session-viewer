@@ -46,23 +46,26 @@ test.afterAll(async () => {
 test('renders fixture sessions in the isolated desktop host', async () => {
   await expect(page.getByTestId('desktop-title-bar')).toBeVisible();
   await expect(page.getByRole('navigation', { name: 'Application menu' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: /Session Viewer/ })).toBeVisible();
+  await expect(page.getByTestId('home-title')).toBeHidden();
   await expect(page.getByTestId('session-list')).toBeVisible();
   const scrolling = await page.evaluate(() => {
     const content = document.querySelector('.desktop-shell__content');
+    const sessionPane = document.querySelector('[data-testid="session-scroll"]');
     return {
       rootOverflow: getComputedStyle(document.documentElement).overflow,
       bodyOverflow: getComputedStyle(document.body).overflow,
       contentOverflowY: getComputedStyle(content).overflowY,
-      scrollbarColor: getComputedStyle(content).scrollbarColor
+      contentScrollTop: content.scrollTop,
+      sessionOverflowY: getComputedStyle(sessionPane).overflowY
     };
   });
   expect(scrolling).toEqual(expect.objectContaining({
     rootOverflow: 'hidden',
     bodyOverflow: 'hidden',
-    contentOverflowY: 'auto'
+    contentOverflowY: 'auto',
+    contentScrollTop: 0,
+    sessionOverflowY: 'auto'
   }));
-  expect(scrolling.scrollbarColor).not.toBe('auto');
 });
 
 test('keeps Node and arbitrary Electron APIs out of the renderer', async () => {
@@ -166,7 +169,7 @@ test('supports pointer and keyboard menu navigation with focus restoration', asy
   await fileMenu.click();
   await expect(page.getByRole('menu', { name: 'File menu' })).toBeVisible();
   await expect(page.getByRole('separator')).toBeVisible();
-  await page.getByRole('heading', { name: /Session Viewer/ }).click();
+  await page.getByPlaceholder('Enter Session ID...').click();
   await expect(page.getByRole('menu', { name: 'File menu' })).toHaveCount(0);
 
   await page.keyboard.press('F10');

@@ -1,85 +1,91 @@
 <template>
-  <div class="max-w-[1400px] w-full text-center mx-auto p-5">
-    <h1 class="text-5xl mb-2.5 text-accent">
+  <div class="home-view max-w-[1400px] w-full text-center mx-auto p-5 flex flex-col overflow-hidden">
+    <div class="shrink-0">
+      <h1 data-testid="home-title" class="home-view__title text-5xl mb-2.5 text-accent">
 🤖 Session Viewer
 </h1>
-    <p class="text-text-secondary mb-10 text-base">
-View session logs from Copilot CLI, Copilot Chat, Claude Code, and Pi-Mono
-</p>
 
-    <form @submit.prevent="viewSession">
-      <div class="bg-surface border-2 border-border rounded-xl p-2 flex gap-2 transition-colors focus-within:border-accent">
-        <input
-          v-model="sessionInput"
-          type="text"
-          class="flex-1 py-4 px-5 min-h-11 bg-transparent border-none text-text-secondary text-base font-mono focus:outline-none placeholder:text-text-faint focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
-          placeholder="Enter Session ID..."
-          autofocus
-          required
-        >
-        <button type="submit" class="py-4 px-8 min-h-11 bg-success-emphasis border-none rounded-lg text-white text-base font-semibold cursor-pointer transition-all hover:bg-success-emphasis hover:scale-[1.02] active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2">
+      <form @submit.prevent="viewSession">
+        <div class="bg-surface border-2 border-border rounded-xl p-2 flex gap-2 transition-colors focus-within:border-accent">
+          <input
+            v-model="sessionInput"
+            type="text"
+            class="flex-1 py-4 px-5 min-h-11 bg-transparent border-none text-text-secondary text-base font-mono focus:outline-none placeholder:text-text-faint focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
+            placeholder="Enter Session ID..."
+            autofocus
+            required
+          >
+          <button type="submit" class="py-4 px-8 min-h-11 bg-success-emphasis border-none rounded-lg text-white text-base font-semibold cursor-pointer transition-all hover:bg-success-emphasis hover:scale-[1.02] active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2">
 View
 </button>
-      </div>
-    </form>
+        </div>
+      </form>
+    </div>
 
-    <div v-if="allSessions.length > 0 || hasLoaded" class="mt-10 text-left">
-      <div class="flex gap-2 mb-4 flex-wrap">
-        <button
-          v-for="pill in filterPills"
-          :key="pill.source"
-          :class="[
-            'filter-pill',
-            currentSourceFilter === pill.source
-              ? 'bg-accent !border-accent !text-white'
-              : 'bg-surface-hover'
-          ]"
-          data-testid="source-pill"
-          @click="selectFilter(pill.source)"
-        >
+    <div v-if="allSessions.length > 0 || hasLoaded" class="mt-10 text-left flex flex-col flex-1 min-h-0 overflow-hidden">
+      <div class="shrink-0">
+        <div class="flex gap-2 mb-4 flex-wrap">
+          <button
+            v-for="pill in filterPills"
+            :key="pill.source"
+            :class="[
+              'filter-pill',
+              currentSourceFilter === pill.source
+                ? 'bg-accent !border-accent !text-white'
+                : 'bg-surface-hover'
+            ]"
+            data-testid="source-pill"
+            @click="selectFilter(pill.source)"
+          >
 {{ pill.label }}
 </button>
-      </div>
-      <!-- Directory info -->
-      <div v-if="currentSourceHintDir || currentCustomDirs.length > 0" class="mb-4 text-sm">
-        <div v-if="currentSourceHintDir" class="flex items-center gap-2 text-text-faint text-sm mb-1">
-          <span>📂 {{ currentSourceHintDir }}</span>
-          <button data-testid="add-dir-btn" class="text-accent cursor-pointer hover:text-link bg-transparent border-none p-0 text-sm" title="Add custom directory" @click="addCustomDirectory">
+        </div>
+        <!-- Directory info -->
+        <div v-if="currentSourceHintDir || currentCustomDirs.length > 0" class="mb-4 text-sm">
+          <div v-if="currentSourceHintDir" class="flex items-center gap-2 text-text-faint text-sm mb-1">
+            <span>📂 {{ currentSourceHintDir }}</span>
+            <button data-testid="add-dir-btn" class="text-accent cursor-pointer hover:text-link bg-transparent border-none p-0 text-sm" title="Add custom directory" @click="addCustomDirectory">
 ＋
 </button>
-          <button data-testid="import-btn" class="text-accent cursor-pointer hover:text-link bg-transparent border-none p-0 text-sm" title="Import session from zip" :style="importLinkStyle" @click="triggerImport">
+            <button data-testid="import-btn" class="text-accent cursor-pointer hover:text-link bg-transparent border-none p-0 text-sm" title="Import session from zip" :style="importLinkStyle" @click="triggerImport">
 📤
 </button>
-        </div>
-        <div v-for="cd in currentCustomDirs" :key="cd.id" class="flex items-center gap-2 text-sm text-text-secondary mb-1">
-          <span class="inline-block w-2.5 h-2.5 rounded-full" :style="{ backgroundColor: cd.color }" />
-          <span class="font-mono">{{ cd.path }}</span>
-          <button data-testid="remove-dir-btn" class="text-text-faint hover:text-error-text bg-transparent border-none cursor-pointer p-0 text-xs" @click="removeCustomDir(cd.id)">
+          </div>
+          <div v-for="cd in currentCustomDirs" :key="cd.id" class="flex items-center gap-2 text-sm text-text-secondary mb-1">
+            <span class="inline-block w-2.5 h-2.5 rounded-full" :style="{ backgroundColor: cd.color }" />
+            <span class="font-mono">{{ cd.path }}</span>
+            <button data-testid="remove-dir-btn" class="text-text-faint hover:text-error-text bg-transparent border-none cursor-pointer p-0 text-xs" @click="removeCustomDir(cd.id)">
 ×
 </button>
+          </div>
         </div>
-      </div>
-      <p v-if="currentSourceFilter" class="hint mt-5 text-text-secondary text-sm">
-        Showing <span class="inline-block bg-surface py-1 px-2 rounded font-mono text-sm text-accent">{{ currentSourceFilter }}</span> sessions
-      </p>
-      <input
-        ref="fileInputRef"
-        type="file"
-        accept=".zip"
-        style="display: none;"
-        @change="handleFileChange"
-      >
-      <div
+        <p v-if="currentSourceFilter" class="hint mt-5 text-text-secondary text-sm">
+          Showing <span class="inline-block bg-surface py-1 px-2 rounded font-mono text-sm text-accent">{{ currentSourceFilter }}</span> sessions
+        </p>
+        <input
+          ref="fileInputRef"
+          type="file"
+          accept=".zip"
+          style="display: none;"
+          @change="handleFileChange"
+        >
+        <div
 v-if="importStatusMsg" :class="[
-        'mb-3 py-2.5 px-3 rounded-md text-sm',
-        importStatusType === 'success' ? 'bg-success-subtle border border-success-emphasis text-success' : '',
-        importStatusType === 'error' ? 'bg-danger-subtle border border-danger-emphasis text-error-text' : '',
-        importStatusType === 'loading' ? 'bg-accent-subtle border border-accent text-accent' : ''
-      ]"
+          'mb-3 py-2.5 px-3 rounded-md text-sm',
+          importStatusType === 'success' ? 'bg-success-subtle border border-success-emphasis text-success' : '',
+          importStatusType === 'error' ? 'bg-danger-subtle border border-danger-emphasis text-error-text' : '',
+          importStatusType === 'loading' ? 'bg-accent-subtle border border-accent text-accent' : ''
+        ]"
 >
 {{ importStatusMsg }}
 </div>
-      <div ref="sessionsContainer">
+      </div>
+      <div
+        ref="sessionsContainer"
+        data-testid="session-scroll"
+        class="flex-1 min-h-0 overflow-y-auto pr-1"
+        @scroll.passive="throttledScroll"
+      >
         <template v-if="filteredSessions.length === 0 && !isLoading">
           <div style="text-align: center; color: #6e7681; padding: 40px; font-size: 14px;">
 No sessions found for this filter.
@@ -103,11 +109,11 @@ No sessions found for this filter.
             </div>
           </template>
         </template>
-      </div>
-      <div v-if="isLoading" style="text-align: center; margin-top: 20px;">
-        <div class="loading-spinner">
+        <div v-if="isLoading" style="text-align: center; margin-top: 20px;">
+          <div class="loading-spinner">
 Loading more sessions...
 </div>
+        </div>
       </div>
     </div>
 
@@ -140,6 +146,7 @@ const importLinkStyle = ref({});
 const importStatusMsg = ref('');
 const importStatusType = ref('');
 const fileInputRef = ref(null);
+const sessionsContainer = ref(null);
 const tooltipRef = ref(null);
 const bottomSheetRef = ref(null);
 
@@ -433,10 +440,13 @@ let importTimer = null;
 function throttledScroll() {
   if (scrollTimeout) return;
   scrollTimeout = setTimeout(() => {
-    const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-    const windowHeight = window.innerHeight;
-    const docHeight = document.documentElement.scrollHeight;
-    if (scrollTop + windowHeight >= docHeight - 500 && getState(currentSourceFilter.value).hasMore && !isLoading.value) {
+    const container = sessionsContainer.value;
+    if (
+      container
+      && container.scrollTop + container.clientHeight >= container.scrollHeight - 500
+      && getState(currentSourceFilter.value).hasMore
+      && !isLoading.value
+    ) {
       loadMore();
     }
     scrollTimeout = null;
@@ -531,7 +541,6 @@ function onTouchEnd() { clearTimeout(lpTimer); }
 
 onMounted(async () => {
   hasLoaded.value = true;
-  window.addEventListener('scroll', throttledScroll);
   document.addEventListener('touchmove', onTouchMove, { passive: true });
   document.addEventListener('touchend', onTouchEnd, { passive: true });
   document.addEventListener('touchcancel', onTouchEnd, { passive: true });
@@ -580,10 +589,23 @@ onUnmounted(() => {
   clearTimeout(scrollTimeout);
   clearTimeout(lpTimer);
   clearTimeout(importTimer);
-  window.removeEventListener('scroll', throttledScroll);
   document.removeEventListener('touchmove', onTouchMove);
   document.removeEventListener('touchend', onTouchEnd);
   document.removeEventListener('touchcancel', onTouchEnd);
   window.removeEventListener('desktop:add-directory', addCustomDirectory);
 });
 </script>
+
+<style>
+.home-view {
+  height: 100dvh;
+}
+
+.desktop-host .home-view {
+  height: 100%;
+}
+
+.desktop-host .home-view__title {
+  display: none;
+}
+</style>

@@ -1,6 +1,12 @@
 const { test, expect } = require('./fixtures');
 
 test.describe('Infinite Scroll', () => {
+  async function scrollSessions(page, offset = 0) {
+    await page.getByTestId('session-scroll').evaluate((element, bottomOffset) => {
+      element.scrollTo(0, element.scrollHeight - bottomOffset);
+    }, offset);
+  }
+
   test.beforeEach(async ({ page, request }) => {
     // Ensure no registered custom dirs leak in from sibling specs — HomeView's
     // bootstrap sync would otherwise pull them into localStorage and add their
@@ -43,7 +49,7 @@ test.describe('Infinite Scroll', () => {
         r => r.url().includes('/sessions') && (r.url().includes('offset=') || r.url().includes('limit=')),
         { timeout: 3000 }
       ).catch(() => null),
-      page.evaluate(() => window.scrollTo(0, document.body.scrollHeight - 400))
+      scrollSessions(page, 400)
     ]);
 
     // Count sessions after scrolling
@@ -68,7 +74,7 @@ test.describe('Infinite Scroll', () => {
         r => r.url().includes('/sessions') && (r.url().includes('offset=') || r.url().includes('limit=')),
         { timeout: 3000 }
       ).catch(() => null),
-      page.evaluate(() => window.scrollTo(0, document.body.scrollHeight - 400))
+      scrollSessions(page, 400)
     ]);
 
     // Check for loading indicator (may appear briefly)
@@ -90,7 +96,7 @@ test.describe('Infinite Scroll', () => {
         r => r.url().includes('/sessions') && (r.url().includes('offset=') || r.url().includes('limit=')),
         { timeout: 3000 }
       ).catch(() => null),
-      page.evaluate(() => window.scrollTo(0, document.body.scrollHeight - 600))
+      scrollSessions(page, 600)
     ]);
 
     // Check if more sessions were loaded
@@ -121,7 +127,7 @@ test.describe('Infinite Scroll', () => {
           r => r.url().includes('/sessions') && (r.url().includes('offset=') || r.url().includes('limit=')),
           { timeout: 2000 }
         ).catch(() => null),
-        page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+        scrollSessions(page)
       ]);
       // Allow DOM to settle after response
       await expect.poll(
@@ -164,7 +170,7 @@ test.describe('Infinite Scroll', () => {
         r => r.url().includes('/sessions') && (r.url().includes('offset=') || r.url().includes('limit=')),
         { timeout: 3000 }
       ).catch(() => null),
-      page.evaluate(() => window.scrollTo(0, document.body.scrollHeight - 400))
+      scrollSessions(page, 400)
     ]);
 
     // Check that page is still functional
@@ -190,7 +196,7 @@ test.describe('Infinite Scroll', () => {
         r => r.url().includes('/sessions') && (r.url().includes('offset=') || r.url().includes('limit=')),
         { timeout: 2000 }
       ).catch(() => null),
-      page.evaluate(() => window.scrollTo(0, document.body.scrollHeight - 400))
+      scrollSessions(page, 400)
     ]);
 
     const sessionsAfterScroll = await page.locator('[data-testid="session-card"]').count();

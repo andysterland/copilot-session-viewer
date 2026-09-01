@@ -17,6 +17,7 @@ capture-*.js
 debug-*.js
 verify-*.js
 generate-*.js
+!electron/scripts/generate-licenses.js
 final-test.js
 
 # Temporary screenshots

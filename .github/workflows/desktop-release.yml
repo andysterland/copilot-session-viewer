@@ -52,26 +52,13 @@ jobs:
 
   build:
     needs: create-draft
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            command: electron:dist:win
-          - os: macos-latest
-            command: electron:dist:mac:release
-          - os: ubuntu-latest
-            command: electron:dist:linux
-    runs-on: ${{ matrix.os }}
+    runs-on: windows-latest
     env:
       GH_TOKEN: ${{ github.token }}
       ELECTRON_PRODUCTION_RELEASE: 'true'
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-      CSC_LINK: ${{ matrix.os == 'windows-latest' && secrets.WINDOWS_CSC_LINK || matrix.os == 'macos-latest' && secrets.MACOS_CSC_LINK || '' }}
-      CSC_KEY_PASSWORD: ${{ matrix.os == 'windows-latest' && secrets.WINDOWS_CSC_KEY_PASSWORD || matrix.os == 'macos-latest' && secrets.MACOS_CSC_KEY_PASSWORD || '' }}
-      APPLE_ID: ${{ matrix.os == 'macos-latest' && secrets.APPLE_ID || '' }}
-      APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.os == 'macos-latest' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
-      APPLE_TEAM_ID: ${{ matrix.os == 'macos-latest' && secrets.APPLE_TEAM_ID || '' }}
+      CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -81,60 +68,45 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run test:electron
-      - name: Build signed or unsigned desktop distribution
+      - name: Build signed or unsigned MSI
         shell: bash
         run: |
-          if [[ "${{ matrix.os }}" == "macos-latest" ]] \
-            && { [[ -z "$CSC_LINK" ]] || [[ -z "$CSC_KEY_PASSWORD" ]] \
-              || [[ -z "$APPLE_ID" ]] || [[ -z "$APPLE_APP_SPECIFIC_PASSWORD" ]] \
-              || [[ -z "$APPLE_TEAM_ID" ]]; }; then
-            echo "::warning::macOS signing credentials are incomplete; building unsigned and without notarization"
-            unset CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
-            npm run electron:dist:mac
-          else
-            if [[ -z "$CSC_LINK" ]] || [[ -z "$CSC_KEY_PASSWORD" ]]; then
-              echo "::warning::Code-signing credentials are not configured; building unsigned"
-              unset CSC_LINK CSC_KEY_PASSWORD
-            fi
-            npm run ${{ matrix.command }}
+          if [[ -z "$CSC_LINK" ]] || [[ -z "$CSC_KEY_PASSWORD" ]]; then
+            echo "::warning::Code-signing credentials are not configured; building unsigned"
+            unset CSC_LINK CSC_KEY_PASSWORD
           fi
-      - run: npm run electron:checksums
+          npm run electron:dist:msi
       - name: Verify Windows signature
-        if: matrix.os == 'windows-latest' && env.CSC_LINK != '' && env.CSC_KEY_PASSWORD != ''
+        if: env.CSC_LINK != '' && env.CSC_KEY_PASSWORD != ''
         shell: pwsh
         run: |
           $exe = Get-ChildItem release/electron/win-unpacked/copilot-session-viewer.exe
           $signature = Get-AuthenticodeSignature $exe.FullName
           if ($signature.Status -ne 'Valid') { throw "Invalid Windows signature: $($signature.Status)" }
-      - name: Verify Apple signature and notarization
-        if: matrix.os == 'macos-latest' && env.CSC_LINK != '' && env.CSC_KEY_PASSWORD != '' && env.APPLE_ID != '' && env.APPLE_APP_SPECIFIC_PASSWORD != '' && env.APPLE_TEAM_ID != ''
-        shell: bash
-        run: |
-          APP_PATH="$(find release/electron -maxdepth 2 -name 'Copilot Session Viewer.app' -print -quit)"
-          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
-          spctl --assess --type execute --verbose=2 "$APP_PATH"
       - name: Upload artifacts to draft release
         shell: bash
         run: |
           set -euo pipefail
-          artifacts=()
-          while IFS= read -r -d '' artifact; do
-            artifacts+=("$artifact")
-          done < <(
-            find release/electron -maxdepth 1 -type f ! -name 'builder-*' -print0
-            if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
-              find electron/generated -maxdepth 1 -type f -print0
-            fi
+          mapfile -d '' msi_artifacts < <(
+            find release/electron -maxdepth 1 -type f -name '*.msi' -print0
           )
-          test "${#artifacts[@]}" -gt 0
-          gh release upload "$GITHUB_REF_NAME" "${artifacts[@]}" --clobber
+          test "${#msi_artifacts[@]}" -eq 1
+          compliance_artifacts=(
+            electron/generated/sbom.cdx.json
+            electron/generated/THIRD_PARTY_LICENSES.txt
+          )
+          for artifact in "${compliance_artifacts[@]}"; do
+            test -f "$artifact"
+          done
+          gh release upload "$GITHUB_REF_NAME" \
+            "${msi_artifacts[0]}" "${compliance_artifacts[@]}" --clobber
 
   publish:
     runs-on: ubuntu-latest
     needs: build
     steps:
       - uses: actions/checkout@v4
-      - name: Publish only after every platform succeeds
+      - name: Publish after the Windows build succeeds
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash

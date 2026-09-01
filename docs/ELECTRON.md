@@ -134,15 +134,13 @@ Local shell events include initialization, focus changes, minimize/maximize/rest
 
 ## Updates and packages
 
-- Windows x64: per-user NSIS; uninstall preserves settings/logs
-- macOS: separate x64 and arm64 DMG and ZIP artifacts
-- Linux x64: AppImage
+- Windows x64: MSI
 
 Stable users receive `latest`; prerelease users receive `beta`. Checks run after startup without blocking the window. Downloads and restart/install both require confirmation; choosing **Later** never installs on normal exit. Downgrades are disabled. Updates are enabled only when the package contains the production-release marker written by the signed release workflow. Unsigned development, CI, and nightly packages remain update-disabled.
 
-Every release should include updater metadata, platform `SHA256SUMS-*` files, third-party license data, and a CycloneDX SBOM. Signing/notarization credentials are provided only through GitHub Actions secrets.
+Every release includes the Windows MSI, GitHub-generated source archives, third-party license data, and a CycloneDX SBOM. Signing credentials are provided only through GitHub Actions secrets.
 
-The release workflow uses signing and notarization credentials when they are configured. If credentials are absent or incomplete, it publishes unsigned artifacts and skips signature verification; macOS also skips notarization. Unsigned packages trigger operating-system trust warnings and must be identified as unsigned in release notes.
+The release workflow uses Windows signing credentials when they are configured. If credentials are absent or incomplete, it publishes an unsigned MSI and skips signature verification. Unsigned packages trigger operating-system trust warnings and must be identified as unsigned in release notes.
 
 ## Development
 
@@ -158,7 +156,7 @@ npm run electron:dist:mac
 npm run electron:dist:linux
 ```
 
-The MSI command allows WiX warnings because ICE validation can be blocked by Windows system policy for non-elevated processes (`LGHT1105`). It does not disable MSI creation or affect the signed NSIS release workflow. Use an unrestricted build host if MSI ICE validation is required for release compliance.
+The MSI command allows WiX warnings because ICE validation can be blocked by Windows system policy for non-elevated processes (`LGHT1105`). It does not disable MSI creation. Use an unrestricted build host if MSI ICE validation is required for release compliance.
 
 Electron test runs use synthetic fixtures and isolated user data. Browser Playwright tests remain independent and do not require Electron globals.
 
@@ -167,8 +165,7 @@ Relevant coverage includes window configuration, IPC sender/schema checks, loggi
 ## Troubleshooting
 
 - **macOS cannot find a CLI:** select its executable in Desktop Settings. GUI applications often have a smaller PATH than Terminal.
-- **Unsigned-build warning:** verify the release checksum and release notes. Public production builds should be signed/notarized when credentials are configured.
-- **AppImage does not start:** run `chmod +x` on it. Desktop integration and delta updates vary by distribution.
+- **Unsigned-build warning:** verify the release notes. Public production builds should be signed when credentials are configured.
 - **No sessions:** add a source directory with the native directory picker or verify the source's default path.
 - **Server/renderer recovery screen:** restart the application and export diagnostics. The host attempts one safe server restart and offers renderer reload/quit recovery.
 - **Offline startup:** the viewer remains usable; update failures are logged and never block startup.

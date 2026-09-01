@@ -42,9 +42,7 @@ copilot-session-viewer
 
 Download the installer for your platform from [GitHub Releases](https://github.com/andysterland/copilot-session-viewer/releases):
 
-- Windows x64: per-user NSIS installer
-- macOS: separate Intel and Apple Silicon DMG/ZIP artifacts
-- Linux x64: AppImage
+- Windows x64: MSI installer
 
 The desktop application is an independent distribution. The existing `npx`, npm, and browser server workflows remain unchanged. See the [desktop guide](docs/ELECTRON.md) for updates, signing status, settings, logs, and troubleshooting.
 

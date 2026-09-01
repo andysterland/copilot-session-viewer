@@ -10,12 +10,12 @@ describe('desktop packaging scripts', () => {
     expect(packageMetadata.scripts['electron:dist:msi']).toContain('--publish never');
   });
 
-  it('keeps the production Windows release on the NSIS target', () => {
+  it('keeps the local Windows distribution on the NSIS target', () => {
     expect(packageMetadata.scripts['electron:dist:win']).toContain('electron-builder --win nsis');
     expect(packageMetadata.scripts['electron:dist:win']).toContain('--publish never');
   });
 
-  it('allows the release workflow to publish unsigned packages', () => {
+  it('publishes only a signed or unsigned Windows MSI and compliance files', () => {
     const workflow = fs.readFileSync(
       path.join(__dirname, '..', '..', '..', '.github', 'workflows', 'desktop-release.yml'),
       'utf8'
@@ -25,8 +25,13 @@ describe('desktop packaging scripts', () => {
     expect(workflow).toContain("CSC_IDENTITY_AUTO_DISCOVERY: 'false'");
     expect(workflow).toContain('building unsigned');
     expect(workflow).toContain('unset CSC_LINK CSC_KEY_PASSWORD');
-    expect(workflow).toContain('npm run electron:dist:mac');
-    expect(workflow).toContain("if: matrix.os == 'windows-latest' && env.CSC_LINK != ''");
-    expect(workflow).toContain('gh release upload "$GITHUB_REF_NAME" "${artifacts[@]}" --clobber');
+    expect(workflow).toContain('runs-on: windows-latest');
+    expect(workflow).toContain('npm run electron:dist:msi');
+    expect(workflow).toContain("find release/electron -maxdepth 1 -type f -name '*.msi'");
+    expect(workflow).toContain('electron/generated/sbom.cdx.json');
+    expect(workflow).toContain('electron/generated/THIRD_PARTY_LICENSES.txt');
+    expect(workflow).not.toContain('macos-latest');
+    expect(workflow).not.toContain('electron:dist:linux');
+    expect(workflow).not.toContain('electron:checksums');
   });
 });

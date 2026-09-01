@@ -26,13 +26,11 @@ Complete installation instructions for Copilot Session Viewer.
 
 Download an artifact from [GitHub Releases](https://github.com/andysterland/copilot-session-viewer/releases):
 
-- Windows x64: NSIS installer (per-user; settings are retained on uninstall)
-- macOS Intel or Apple Silicon: DMG or ZIP
-- Linux x64: AppImage
+- Windows x64: MSI installer
 
-Windows and Linux use a themed custom title bar, File/View/Help menus, and window controls. macOS keeps native traffic lights in a themed inset title region. Application confirmations and text prompts use accessible in-app dialogs; file, folder, executable, and save pickers remain native.
+Windows uses a themed custom title bar, File/View/Help menus, and window controls. Application confirmations and text prompts use accessible in-app dialogs; file, folder, executable, and save pickers remain native.
 
-Unsigned development artifacts may show operating-system warnings. Production releases are signing/notarization-ready; verify the release notes and platform `SHA256SUMS-*` file. See [ELECTRON.md](ELECTRON.md).
+Unsigned development artifacts may show operating-system warnings. Production releases are signing-ready; verify the release notes. See [ELECTRON.md](ELECTRON.md).
 
 ---
 
